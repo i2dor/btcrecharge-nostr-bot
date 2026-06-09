@@ -26,10 +26,14 @@ const PackageSchema = z.object({
     amount: z.union([z.number(), z.string()]).optional(),
 });
 
+// Bitrefill operators inside /api/operators?country=XX are already filtered
+// to that country, so the API does NOT repeat `country_code` on each row -
+// it lives on the wrapper. We keep the field optional and back-fill it from
+// the wrapper before passing the row to transformToCatalog.
 const OperatorSchema = z.object({
     id:             z.string().min(1),
     name:           z.string().min(1),
-    country_code:   z.string().length(2),
+    country_code:   z.string().length(2).optional(),
     country_name:   z.string().min(1).optional(),
     currency:       z.string().min(1).optional(),
     categories:     z.array(z.string()).optional(),
@@ -188,7 +192,10 @@ export class CatalogClient {
             if (!parsed.success) {
                 throw new Error(`schema parse failed for country ${country}: ${parsed.error.message}`);
             }
-            return parsed.data.operators;
+            // Back-fill country_code from the wrapper since the operator rows
+            // omit it (they are already scoped to that country).
+            const cc = parsed.data.country.toUpperCase();
+            return parsed.data.operators.map(op => ({ ...op, country_code: op.country_code ?? cc }));
         } finally {
             clearTimeout(timer);
         }
@@ -214,9 +221,10 @@ export function countryFlag(cc: string): string {
 /** Stable short SKU we promise to customers ("operator-cc" or, if collision-prone, "operator-cc-N"). */
 export function makeSku(op: RawOperator): string {
     const id = op.id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    // ID often already ends with -country, but not always.
-    if (id.endsWith('-' + op.country_code.toLowerCase())) return id;
-    return id + '-' + op.country_code.toLowerCase();
+    const cc = (op.country_code ?? '').toLowerCase();
+    if (!cc) return id;
+    if (id.endsWith('-' + cc)) return id;
+    return id + '-' + cc;
 }
 
 /** Map the upstream operator shape to our user-facing CatalogItem. */
@@ -227,7 +235,7 @@ export function transformToCatalog(raw: readonly RawOperator[]): CatalogItem[] {
             sku:        makeSku(op),
             operatorId: op.id,
             label:      op.name,
-            country:    op.country_code.toUpperCase(),
+            country:    (op.country_code ?? '').toUpperCase(),
             currency:   op.currency ?? '',
             amounts:    op.packages.map(p => p.value),
             inStock:    op.in_stock !== false,
