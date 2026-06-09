@@ -71,7 +71,7 @@ interface InternalSub {
     handle:  { close(): void } | null;
 }
 
-const DEFAULT_RESUBSCRIBE_MS = 10 * 60 * 1000; // 10 minutes
+const DEFAULT_RESUBSCRIBE_MS = 2 * 60 * 1000; // 2 minutes - keeps live tail fresh on public relays
 const DEFAULT_SEEN_LIMIT     = 5000;
 
 export class RelayPool {

@@ -56,9 +56,11 @@ async function main(): Promise<void> {
     const relayPool = new RelayPool({ relays: cfg.nostrRelays }, log);
 
     // Inbound subscription: kind 4 (NIP-04) + kind 1059 (NIP-17 gift wrap)
-    // addressed to the bot pubkey, from now onwards. The relay pool's
-    // periodic re-subscribe handles silent-EOSE drops on public relays.
-    const since: number = Math.floor(Date.now() / 1000) - 30;
+    // addressed to the bot pubkey. Look back 5 minutes so a customer DM
+    // sent in the brief window around a Railway redeploy is picked up on
+    // boot. The relay pool dedupes via seen-event-id LRU, so replaying
+    // recent events on every restart is harmless.
+    const since: number = Math.floor(Date.now() / 1000) - 300;
     const filter: Filter = {
         kinds: [4, 1059],
         '#p':  [id.pubkey],
