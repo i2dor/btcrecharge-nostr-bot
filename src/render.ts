@@ -95,7 +95,16 @@ async function createInvoice(
     session: CustomerSession,
     deps:    RenderDeps,
 ): Promise<string> {
-    const item = await deps.catalog.getBySku(sku);
+    // Catalog lookup can throw (Redis down, every country fetch failed,
+    // schema mismatch) - surface a user-visible message instead of letting
+    // it propagate up to the handler's silent catch-all.
+    let item;
+    try {
+        item = await deps.catalog.getBySku(sku);
+    } catch (err) {
+        deps.logger.error({ err: String(err), sku }, 'catalog lookup failed during invoice');
+        return 'Catalog is temporarily unavailable. Try again in a minute.';
+    }
     if (!item) {
         return `Unknown SKU "${sku}". Try /menu to see what is available.`;
     }
