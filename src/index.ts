@@ -49,7 +49,10 @@ async function main(): Promise<void> {
     redis.on('connect', () => log.info('redis connected'));
 
     const sessionStore = new SessionStore(redis, log);
-    const catalog      = new CatalogClient({ baseUrl: cfg.btcrechargeBaseUrl }, redis, log);
+    const catalog      = new CatalogClient({
+        baseUrl:    cfg.btcrechargeBaseUrl,
+        directOnly: cfg.directTopupOnly,
+    }, redis, log);
     const btcrecharge  = new BtcrechargeClient({
         baseUrl:          cfg.btcrechargeBaseUrl,
         nostrProxySecret: cfg.nostrProxySecret,

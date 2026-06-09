@@ -26,6 +26,11 @@ const Schema = z.object({
     // Set this to e.g. `https://btcrecharge-nostr-bot.up.railway.app` once
     // you have generated a public domain for the service.
     BOT_PUBLIC_URL:       z.string().url().optional(),
+    // Hide PIN-delivery operators from the catalog. We have not built a
+    // secure voucher-PIN delivery flow on Nostr; surfacing them risks
+    // stuck orders and refund pressure. Flip to `false` once the PIN
+    // flow ships (see task #172 / Phase 3 refund design task #173).
+    DIRECT_TOPUP_ONLY:    z.enum(['true', 'false']).default('true').transform(s => s === 'true'),
 });
 
 export interface Config {
@@ -38,6 +43,7 @@ export interface Config {
     logLevel:           'trace' | 'debug' | 'info' | 'warn' | 'error';
     appEnv:             'development' | 'test' | 'staging' | 'production';
     botPublicUrl:       string | undefined;
+    directTopupOnly:    boolean;
 }
 
 let cached: Config | null = null;
@@ -55,6 +61,7 @@ export function getConfig(): Config {
         logLevel:           parsed.LOG_LEVEL,
         appEnv:             parsed.APP_ENV,
         botPublicUrl:       parsed.BOT_PUBLIC_URL?.replace(/\/$/, ''),
+        directTopupOnly:    parsed.DIRECT_TOPUP_ONLY,
     };
     return cached;
 }

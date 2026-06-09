@@ -38,6 +38,10 @@ const OperatorSchema = z.object({
     currency:       z.string().min(1).optional(),
     categories:     z.array(z.string()).optional(),
     recipient_type: z.string().optional(),
+    // 'direct' (instant phone credit) | 'pin' (voucher needs manual
+    // redemption). The bot defaults to direct-only because we have not
+    // built a secure PIN-delivery flow on Nostr yet.
+    delivery:       z.string().optional(),
     in_stock:       z.boolean().optional(),
     packages:       z.array(PackageSchema).default([]),
 });
@@ -94,6 +98,13 @@ export interface CatalogClientOptions {
     /** TTL on the cached aggregate, seconds. */
     cacheTtl?:  number;
     timeoutMs?: number;
+    /**
+     * When true (default) we drop operators whose `delivery` field is not
+     * `direct`. PIN-redemption operators require us to DM a voucher code
+     * to the customer; we have not built that flow on Nostr, and shipping
+     * it without is a recipe for stuck orders and chargebacks.
+     */
+    directOnly?: boolean;
 }
 
 /** Minimum Redis surface we touch for the catalog cache. */
@@ -105,22 +116,24 @@ export interface RedisCacheLike {
 const CACHE_KEY = 'nostr-bot:catalog:v1';
 
 export class CatalogClient {
-    private readonly baseUrl:   string;
-    private readonly countries: readonly string[];
-    private readonly fetchImpl: typeof fetch;
-    private readonly cacheTtl:  number;
-    private readonly timeoutMs: number;
-    private readonly redis:     RedisCacheLike;
-    private readonly log:       Logger;
+    private readonly baseUrl:    string;
+    private readonly countries:  readonly string[];
+    private readonly fetchImpl:  typeof fetch;
+    private readonly cacheTtl:   number;
+    private readonly timeoutMs:  number;
+    private readonly directOnly: boolean;
+    private readonly redis:      RedisCacheLike;
+    private readonly log:        Logger;
 
     constructor(opts: CatalogClientOptions, redis: RedisCacheLike, logger: Logger) {
-        this.baseUrl   = opts.baseUrl.replace(/\/$/, '');
-        this.countries = opts.countries ?? DEFAULT_COUNTRIES;
-        this.fetchImpl = opts.fetchImpl ?? fetch;
-        this.cacheTtl  = opts.cacheTtl  ?? 5 * 60;
-        this.timeoutMs = opts.timeoutMs ?? 15_000;
-        this.redis     = redis;
-        this.log       = logger.child({ component: 'catalog' });
+        this.baseUrl    = opts.baseUrl.replace(/\/$/, '');
+        this.countries  = opts.countries ?? DEFAULT_COUNTRIES;
+        this.fetchImpl  = opts.fetchImpl ?? fetch;
+        this.cacheTtl   = opts.cacheTtl  ?? 5 * 60;
+        this.timeoutMs  = opts.timeoutMs ?? 15_000;
+        this.directOnly = opts.directOnly ?? true;
+        this.redis      = redis;
+        this.log        = logger.child({ component: 'catalog' });
     }
 
     /** Return the cached catalog if fresh, otherwise refetch + repopulate. */
@@ -148,9 +161,12 @@ export class CatalogClient {
     /** Force a fresh fetch from btcrecharge. Caller code should rarely need this. */
     async refresh(): Promise<CatalogItem[]> {
         const fetched = await this.fetchAllCountries();
-        const items = transformToCatalog(fetched);
+        const items   = transformToCatalog(fetched, { directOnly: this.directOnly });
         await this.redis.set(CACHE_KEY, JSON.stringify(items), 'EX', this.cacheTtl);
-        this.log.info({ countries: this.countries.length, items: items.length }, 'catalog refreshed');
+        this.log.info(
+            { countries: this.countries.length, items: items.length, directOnly: this.directOnly },
+            'catalog refreshed',
+        );
         return items;
     }
 
@@ -227,10 +243,24 @@ export function makeSku(op: RawOperator): string {
     return id + '-' + cc;
 }
 
+export interface TransformOptions {
+    /** Drop operators whose `delivery` is not `direct`. Defaults to true. */
+    directOnly?: boolean;
+}
+
 /** Map the upstream operator shape to our user-facing CatalogItem. */
-export function transformToCatalog(raw: readonly RawOperator[]): CatalogItem[] {
+export function transformToCatalog(
+    raw:  readonly RawOperator[],
+    opts: TransformOptions = {},
+): CatalogItem[] {
+    const directOnly = opts.directOnly ?? true;
     return raw
         .filter(op => Array.isArray(op.packages) && op.packages.length > 0)
+        // PIN-delivery operators DM a voucher code that the customer redeems
+        // manually. We have not shipped that flow on Nostr yet, so by
+        // default we hide them; toggle off via DIRECT_TOPUP_ONLY=false when
+        // a PIN-delivery flow lands.
+        .filter(op => !directOnly || op.delivery === 'direct')
         .map((op) => ({
             sku:        makeSku(op),
             operatorId: op.id,

@@ -69,11 +69,18 @@ function makeFetch(perCountry: Record<string, { ok: true; operators: RawOperator
     return { fetchImpl, calls };
 }
 
-const mkOp = (id: string, country: string, name: string, packages: Array<{ value: string; price?: number }>): RawOperator => ({
+const mkOp = (
+    id:       string,
+    country:  string,
+    name:     string,
+    packages: Array<{ value: string; price?: number }>,
+    delivery: string = 'direct',
+): RawOperator => ({
     id,
     name,
     country_code: country,
     currency:     'USD',
+    delivery,
     in_stock:     true,
     packages:     packages.map(p => ({ value: p.value, price: p.price ?? 100 })),
 });
@@ -201,6 +208,48 @@ test('catalog: refresh throws when EVERY country fetch fails', async () => {
         redis, SILENT,
     );
     await assert.rejects(client.refresh(), /every country fetch failed/);
+});
+
+test('transformToCatalog: directOnly (default) drops delivery=pin operators', () => {
+    // Real btcrecharge data classifies operators as `direct` (instant
+    // phone credit) or `pin` (voucher needing manual redemption). The
+    // Nostr bot has no PIN delivery flow, so the catalog must hide them
+    // until that lands.
+    const items = transformToCatalog([
+        mkOp('vodafone-direct-de', 'DE', 'Vodafone DE',       [{ value: '15' }], 'direct'),
+        mkOp('vodafone-pin-de',    'DE', 'Vodafone DE (PIN)', [{ value: '15' }], 'pin'),
+    ]);
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.operatorId, 'vodafone-direct-de');
+});
+
+test('transformToCatalog: directOnly=false keeps pin operators (toggle for when PIN flow ships)', () => {
+    const items = transformToCatalog(
+        [
+            mkOp('vodafone-direct-de', 'DE', 'Vodafone DE',       [{ value: '15' }], 'direct'),
+            mkOp('vodafone-pin-de',    'DE', 'Vodafone DE (PIN)', [{ value: '15' }], 'pin'),
+        ],
+        { directOnly: false },
+    );
+    assert.equal(items.length, 2);
+});
+
+test('transformToCatalog: directOnly drops operators with missing delivery field (conservative)', () => {
+    // If btcrecharge ever drops the field for a new operator type we have
+    // not seen, fail closed rather than ship an unverified flow. Easier
+    // to add a known-good value to a whitelist later than to debug a
+    // stuck order in prod.
+    const op: RawOperator = {
+        id:           'unknown-xx',
+        name:         'Unknown XX',
+        country_code: 'XX',
+        currency:     'USD',
+        in_stock:     true,
+        packages:     [{ value: '5', price: 100 }],
+        // delivery deliberately omitted
+    };
+    const items = transformToCatalog([op]);
+    assert.equal(items.length, 0);
 });
 
 test('renderMenu (no country): compact intro - hint codes + total count, no per-country dump', () => {
