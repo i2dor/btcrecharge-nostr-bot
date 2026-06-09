@@ -22,6 +22,26 @@ In practice, broadcasting to the major public relays (damus.io,
 nos.lol, snort.social) catches the event for most clients within a few
 minutes.
 
+## What event kinds this can delete
+
+NIP-09 is kind-agnostic. The same `delete-event` script works for
+anything the bot published. Common cases:
+
+| Kind | What it is | Notes on deletion |
+|---|---|---|
+| 1 | Short text note | Standard - what people usually think of as "the post" |
+| 6 | Repost (NIP-18) | Wraps a foreign event id; the original is not affected, only the bot's repost vanishes |
+| 7 | Reaction / like (NIP-25) | The `+` reaction event itself. Deleting it removes the bot's like from the target note's reaction count once clients pick up the delete |
+| 9735 | Zap receipt (NIP-57) | Deleting a zap receipt does not refund anything, the payment already happened on Lightning. Only the receipt event is retracted |
+| 30023 | Long-form article (NIP-23) | Standard delete; replaceable, so a new version with the same `d` tag overrides the old without needing a kind 5 |
+| 30000+ | Replaceable / parameterized replaceable | A delete suppresses every version; usually you want to publish a new version instead, not delete |
+
+For a wrong like specifically (e.g. you tapped heart on someone's note
+from the bot account by accident), the flow is identical to deleting a
+repost: find the like's event id, run `delete-event --event-id=<hex>`.
+Some clients show the like remained in the count until they refresh -
+that is the client cache; force-refresh to verify.
+
 ## Find the event id
 
 The event id is 64 hex chars and uniquely identifies the event.
