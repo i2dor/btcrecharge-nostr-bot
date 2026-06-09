@@ -102,7 +102,12 @@ async function fetchLatestKind0(
 }
 
 /** Preserve unset fields from the existing kind 0; only flags actually
- *  passed on the CLI overwrite the merged content. */
+ *  passed on the CLI overwrite the merged content. An EMPTY-string flag
+ *  (`--website=`) is treated as a delete request - useful when the field
+ *  was set previously and you want it gone from the published JSON, not
+ *  just blanked. Without delete semantics a leftover `--website=""` in
+ *  the wire format still renders as a clickable element in some clients
+ *  (Primal does this), defeating the point of clearing it. */
 export function mergeContent(
     existingContent: string | null,
     flags:           ProfileFields,
@@ -114,7 +119,12 @@ export function mergeContent(
     }
     for (const k of KNOWN_KEYS) {
         const v = flags[k];
-        if (v !== undefined) base[k] = v;
+        if (v === undefined) continue;
+        if (v === '') {
+            delete base[k];
+        } else {
+            base[k] = v;
+        }
     }
     return base;
 }

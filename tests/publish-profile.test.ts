@@ -79,3 +79,15 @@ test('mergeContent: empty flags + existing content returns the existing content 
     const merged   = mergeContent(existing, {});
     assert.deepEqual(merged, { name: 'bot', picture: 'https://x/a.png' });
 });
+
+test('mergeContent: empty-string flag DELETES the field (so Primal stops rendering a clickable link)', () => {
+    const existing = JSON.stringify({
+        name:    'bot',
+        about:   'still here',
+        website: 'https://OLD.example',
+    });
+    const merged = mergeContent(existing, { website: '' });
+    assert.equal(merged.name,  'bot');
+    assert.equal(merged.about, 'still here');
+    assert.ok(!('website' in merged), 'website key must be gone, not just blanked');
+});

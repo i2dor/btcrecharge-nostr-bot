@@ -82,6 +82,20 @@ generation; design source is `/tmp/btcrecharge-{avatar,banner}.svg`.
 Both kebab-case (`--display-name`) and snake-case (`--display_name`) are
 accepted on the CLI.
 
+## Removing a field entirely
+
+Pass an empty value to **delete** the key from the published JSON:
+
+```bash
+BOT_NSEC=<nsec1...> npm run publish-profile -- --website=
+```
+
+This removes `website` from the kind 0 content. Useful when a client
+renders the field as a clickable element next to the bio (Primal does
+this for `website`), which competes with your "DM me" call-to-action.
+A plain "blank" string is not enough - the key has to be gone from the
+event for clients to stop drawing the chip.
+
 ## After publish - verify propagation
 
 The script prints per-relay outcome:
