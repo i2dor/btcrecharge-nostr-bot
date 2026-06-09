@@ -1,4 +1,4 @@
-# The first Nostr DM bot for international mobile top-ups, paid in Bitcoin and Lightning
+# The first Nostr DM bot for international mobile top-ups, paid with Lightning
 
 You DM the bot. It DMs back. You walk through a guided flow. You pay a
 Lightning invoice. The recipient's phone is topped up within seconds.
