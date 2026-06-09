@@ -20,6 +20,9 @@ Pick the entry point that matches what you are trying to do.
   publish-profile script
 - [EVENT-DELETION.md](EVENT-DELETION.md) - retract a published event
   via NIP-09 (kind 5 deletion request) with the delete-event script
+- [PUBLISH-ARTICLE.md](PUBLISH-ARTICLE.md) - publish a markdown article
+  as a NIP-23 long-form note (kind 30023) with the publish-article
+  script
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - known failure modes with
   recovery recipes, debugging cookbook
 
