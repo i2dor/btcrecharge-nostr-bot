@@ -39,6 +39,7 @@ export const FlowSchema = z.object({
         'entering_phone',
         'confirming_amount',
         'awaiting_payment',
+        'awaiting_refund_address',
     ]),
     ctx: z.record(z.unknown()).default({}),
 });
@@ -61,13 +62,18 @@ export const MetadataSchema = z.object({
 });
 
 export const SessionSchema = z.object({
-    pubkey:           z.string().regex(/^[0-9a-f]{64}$/i),
-    protocol:         ProtocolSchema.nullable(),
-    flow:             FlowSchema,
-    cart:             z.array(CartItemSchema),
-    pendingOrderIds:  z.array(z.string().min(1)),
-    rateLimit:        RateLimitSchema,
-    metadata:         MetadataSchema,
+    pubkey:                  z.string().regex(/^[0-9a-f]{64}$/i),
+    protocol:                ProtocolSchema.nullable(),
+    flow:                    FlowSchema,
+    cart:                    z.array(CartItemSchema),
+    pendingOrderIds:         z.array(z.string().min(1)),
+    // Orders the backend has flipped to refund_pending. The bot keeps
+    // this list separately from pendingOrderIds so that an inbound
+    // Lightning address has a clear target even if the customer wandered
+    // off the awaiting_refund_address flow with /menu first.
+    refundPendingOrderIds:   z.array(z.string().min(1)).default([]),
+    rateLimit:               RateLimitSchema,
+    metadata:                MetadataSchema,
 });
 
 export type CustomerSession = z.infer<typeof SessionSchema>;
@@ -208,7 +214,8 @@ export function blankSession(pubkey: string): CustomerSession {
         protocol: null,
         flow:     { type: 'idle', ctx: {} },
         cart:     [],
-        pendingOrderIds: [],
+        pendingOrderIds:       [],
+        refundPendingOrderIds: [],
         rateLimit: { bucket: 0, lastRefill: ts },
         metadata:  { firstSeen: ts, lastSeen: ts, totalOrders: 0 },
     };
