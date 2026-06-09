@@ -120,26 +120,66 @@ test('fsm: /menu transitions idle -> selecting_carrier and emits send_menu', () 
     assert.equal(r.actions[0]!.kind, 'send_menu');
 });
 
-test('fsm: full happy path /menu -> /buy -> phone -> /confirm -> send_invoice', () => {
+test('fsm: full happy path /menu -> /buy -> pick_amount -> phone -> /confirm -> send_invoice', () => {
     let s = idle();
 
     s = transition(s, { kind: 'menu' }).session;
     assert.equal(s.flow.type, 'selecting_carrier');
 
-    s = transition(s, { kind: 'buy', sku: 'airtel-in-5' }).session;
-    assert.equal(s.flow.type, 'entering_phone');
+    // /buy now lands in selecting_amount and emits send_amounts so the
+    // customer can pick from the numbered list instead of being railroaded
+    // into the smallest denomination.
+    const afterBuy = transition(s, { kind: 'buy', sku: 'airtel-in-5' });
+    s = afterBuy.session;
+    assert.equal(s.flow.type, 'selecting_amount');
     assert.equal((s.flow.ctx as { sku?: string }).sku, 'airtel-in-5');
+    assert.equal(afterBuy.actions[0]!.kind, 'send_amounts');
 
-    s = transition(s, { kind: 'phone', value: '+918123456789' }).session;
+    s = transition(s, { kind: 'pick_amount', index: 2 }).session;
+    assert.equal(s.flow.type, 'entering_phone');
+    assert.equal((s.flow.ctx as { amountIndex?: number }).amountIndex, 2);
+
+    const afterPhone = transition(s, { kind: 'phone', value: '+918123456789' });
+    s = afterPhone.session;
     assert.equal(s.flow.type, 'confirming_amount');
     assert.equal((s.flow.ctx as { phone?: string }).phone, '+918123456789');
+    assert.equal(afterPhone.actions[0]!.kind, 'send_confirm_prompt');
 
     const final = transition(s, { kind: 'confirm' });
     assert.equal(final.session.flow.type, 'awaiting_payment');
     assert.equal(final.actions[0]!.kind, 'send_invoice');
     if (final.actions[0]!.kind === 'send_invoice') {
-        assert.equal(final.actions[0]!.sku,   'airtel-in-5');
-        assert.equal(final.actions[0]!.phone, '+918123456789');
+        assert.equal(final.actions[0]!.sku,         'airtel-in-5');
+        assert.equal(final.actions[0]!.amountIndex, 2);
+        assert.equal(final.actions[0]!.phone,       '+918123456789');
+    }
+});
+
+test('parser: in selecting_amount, a bare integer parses as pick_amount', () => {
+    const flow = inFlow('selecting_amount', { sku: 'airtel-in-5' }).flow;
+    const i    = parseCommand('2', flow);
+    assert.equal(i.kind, 'pick_amount');
+    if (i.kind === 'pick_amount') assert.equal(i.index, 2);
+});
+
+test('parser: in selecting_amount, non-numeric input is unknown (gets a re-prompt)', () => {
+    const flow = inFlow('selecting_amount', { sku: 'airtel-in-5' }).flow;
+    assert.equal(parseCommand('five', flow).kind, 'unknown');
+});
+
+test('fsm: pick_amount outside selecting_amount is ignored gracefully', () => {
+    const s = inFlow('idle');
+    const r = transition(s, { kind: 'pick_amount', index: 1 });
+    assert.equal(r.session.flow.type, 'idle');
+    assert.equal(r.actions[0]!.kind, 'send_text');
+});
+
+test('fsm: unknown input in selecting_amount nudges to pick a number', () => {
+    const s = inFlow('selecting_amount', { sku: 'x' });
+    const r = transition(s, { kind: 'unknown', raw: 'huh?' });
+    assert.equal(r.session.flow.type, 'selecting_amount');
+    if (r.actions[0]!.kind === 'send_text') {
+        assert.match(r.actions[0]!.text, /number/i);
     }
 });
 

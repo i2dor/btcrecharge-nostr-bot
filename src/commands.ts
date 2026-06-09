@@ -26,11 +26,12 @@ export type Intent =
     | { kind: 'cart' }
     | { kind: 'clear' }
     | { kind: 'cancel' }
-    | { kind: 'buy';     sku: string }
-    | { kind: 'status';  orderId: string }
-    | { kind: 'phone';   value: string }
+    | { kind: 'buy';        sku: string }
+    | { kind: 'pick_amount'; index: number }
+    | { kind: 'status';     orderId: string }
+    | { kind: 'phone';      value: string }
     | { kind: 'confirm' }
-    | { kind: 'unknown'; raw: string };
+    | { kind: 'unknown';    raw: string };
 
 const SLASH_COMMANDS = new Set([
     'start', 'help', 'menu', 'cart', 'clear', 'cancel',
@@ -77,6 +78,10 @@ export function parseCommand(text: string, flow: Flow): Intent {
     }
 
     // No slash command. Interpret against current flow.
+    if (flow.type === 'selecting_amount' && /^\d{1,3}$/.test(trimmed)) {
+        const index = parseInt(trimmed, 10);
+        if (index >= 1) return { kind: 'pick_amount', index };
+    }
     if (flow.type === 'entering_phone' && PHONE_RE.test(trimmed)) {
         return { kind: 'phone', value: normalizePhone(trimmed) };
     }
@@ -96,12 +101,14 @@ function normalizePhone(raw: string): string {
 // ----- FSM (transition output) --------------------------------------
 
 export type Action =
-    | { kind: 'send_text';    text: string }
+    | { kind: 'send_text';           text: string }
     | { kind: 'send_help' }
     | { kind: 'send_menu' }
     | { kind: 'send_cart' }
-    | { kind: 'send_invoice'; sku: string; phone: string }
-    | { kind: 'send_status';  orderId: string };
+    | { kind: 'send_amounts';        sku: string }
+    | { kind: 'send_confirm_prompt'; sku: string; amountIndex: number; phone: string }
+    | { kind: 'send_invoice';        sku: string; amountIndex: number; phone: string }
+    | { kind: 'send_status';         orderId: string };
 
 export interface TransitionResult {
     session: CustomerSession;
@@ -111,8 +118,7 @@ export interface TransitionResult {
 const HELP_TEXT_FOR_INVALID_BUY = 'I need a SKU. Try /menu to see the catalog, then /buy <sku>.';
 const HELP_TEXT_FOR_INVALID_STATUS = 'Tell me which order. Try /status <order-id>.';
 const PROMPT_PHONE   = 'Got it. Reply with the recipient phone number including country code, e.g. +918123456789';
-const PROMPT_CONFIRM = (sku: string, phone: string) =>
-    `Confirm: ${sku} for ${phone}. Reply /confirm to proceed or /cancel to abort.`;
+const PROMPT_PICK_AGAIN = 'Reply with one of the numbers shown above, e.g. "1".';
 const WAITING_PAY    = 'I am waiting for your Lightning payment. Reply /cancel to abort.';
 const CANCELLED      = 'Cancelled. Reply /menu to start over.';
 const CART_CLEARED   = 'Cart cleared. Reply /menu to start over.';
@@ -162,13 +168,13 @@ export function transition(session: CustomerSession, intent: Intent): Transition
             return {
                 session: {
                     ...session,
-                    flow: { type: 'entering_phone', ctx: { sku: intent.sku } },
+                    flow: { type: 'selecting_amount', ctx: { sku: intent.sku } },
                 },
-                actions: [{ kind: 'send_text', text: PROMPT_PHONE }],
+                actions: [{ kind: 'send_amounts', sku: intent.sku }],
             };
 
-        case 'phone': {
-            if (session.flow.type !== 'entering_phone') {
+        case 'pick_amount': {
+            if (session.flow.type !== 'selecting_amount') {
                 return { session, actions: [{ kind: 'send_text', text: UNKNOWN }] };
             }
             const sku = (session.flow.ctx as { sku?: string }).sku;
@@ -178,9 +184,26 @@ export function transition(session: CustomerSession, intent: Intent): Transition
             return {
                 session: {
                     ...session,
-                    flow: { type: 'confirming_amount', ctx: { sku, phone: intent.value } },
+                    flow: { type: 'entering_phone', ctx: { sku, amountIndex: intent.index } },
                 },
-                actions: [{ kind: 'send_text', text: PROMPT_CONFIRM(sku, intent.value) }],
+                actions: [{ kind: 'send_text', text: PROMPT_PHONE }],
+            };
+        }
+
+        case 'phone': {
+            if (session.flow.type !== 'entering_phone') {
+                return { session, actions: [{ kind: 'send_text', text: UNKNOWN }] };
+            }
+            const { sku, amountIndex } = session.flow.ctx as { sku?: string; amountIndex?: number };
+            if (!sku || !amountIndex) {
+                return { session: idle(session), actions: [{ kind: 'send_text', text: UNKNOWN }] };
+            }
+            return {
+                session: {
+                    ...session,
+                    flow: { type: 'confirming_amount', ctx: { sku, amountIndex, phone: intent.value } },
+                },
+                actions: [{ kind: 'send_confirm_prompt', sku, amountIndex, phone: intent.value }],
             };
         }
 
@@ -188,22 +211,28 @@ export function transition(session: CustomerSession, intent: Intent): Transition
             if (session.flow.type !== 'confirming_amount') {
                 return { session, actions: [{ kind: 'send_text', text: UNKNOWN }] };
             }
-            const { sku, phone } = session.flow.ctx as { sku?: string; phone?: string };
-            if (!sku || !phone) {
+            const { sku, amountIndex, phone } = session.flow.ctx as { sku?: string; amountIndex?: number; phone?: string };
+            if (!sku || !amountIndex || !phone) {
                 return { session: idle(session), actions: [{ kind: 'send_text', text: UNKNOWN }] };
             }
             return {
                 session: {
                     ...session,
-                    flow: { type: 'awaiting_payment', ctx: { sku, phone } },
+                    flow: { type: 'awaiting_payment', ctx: { sku, amountIndex, phone } },
                 },
-                actions: [{ kind: 'send_invoice', sku, phone }],
+                actions: [{ kind: 'send_invoice', sku, amountIndex, phone }],
             };
         }
 
         case 'unknown':
             if (session.flow.type === 'awaiting_payment') {
                 return { session, actions: [{ kind: 'send_text', text: WAITING_PAY }] };
+            }
+            if (session.flow.type === 'selecting_amount') {
+                return {
+                    session,
+                    actions: [{ kind: 'send_text', text: PROMPT_PICK_AGAIN }],
+                };
             }
             if (session.flow.type === 'entering_phone') {
                 return {

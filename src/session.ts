@@ -35,6 +35,7 @@ export const FlowSchema = z.object({
     type: z.enum([
         'idle',
         'selecting_carrier',
+        'selecting_amount',
         'entering_phone',
         'confirming_amount',
         'awaiting_payment',

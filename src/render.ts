@@ -72,8 +72,14 @@ export async function actionToText(
             return lines.join('\n');
         }
 
+        case 'send_amounts':
+            return renderAmounts(action.sku, deps);
+
+        case 'send_confirm_prompt':
+            return renderConfirmPrompt(action.sku, action.amountIndex, action.phone, deps);
+
         case 'send_invoice':
-            return createInvoice(action.sku, action.phone, session, deps);
+            return createInvoice(action.sku, action.amountIndex, action.phone, session, deps);
 
         case 'send_status':
             // Real status lookup lands later; for now acknowledge the request
@@ -89,34 +95,76 @@ export async function actionToText(
     }
 }
 
-async function createInvoice(
-    sku:     string,
-    phone:   string,
-    session: CustomerSession,
-    deps:    RenderDeps,
-): Promise<string> {
-    // Catalog lookup can throw (Redis down, every country fetch failed,
-    // schema mismatch) - surface a user-visible message instead of letting
-    // it propagate up to the handler's silent catch-all.
-    let item;
+/** Fetch a catalog item, mapping throws + null + empty-amounts into a single user-visible message. */
+async function loadItem(
+    sku:  string,
+    deps: RenderDeps,
+    op:   string,
+): Promise<{ ok: true; item: import('./catalog.js').CatalogItem } | { ok: false; message: string }> {
     try {
-        item = await deps.catalog.getBySku(sku);
+        const item = await deps.catalog.getBySku(sku);
+        if (!item) {
+            return { ok: false, message: `Unknown SKU "${sku}". Try /menu to see what is available.` };
+        }
+        if (!item.amounts.length) {
+            return { ok: false, message: `${item.label} has no available amounts right now.` };
+        }
+        return { ok: true, item };
     } catch (err) {
-        deps.logger.error({ err: String(err), sku }, 'catalog lookup failed during invoice');
-        return 'Catalog is temporarily unavailable. Try again in a minute.';
+        deps.logger.error({ err: String(err), sku, op }, 'catalog lookup failed');
+        return { ok: false, message: 'Catalog is temporarily unavailable. Try again in a minute.' };
     }
-    if (!item) {
-        return `Unknown SKU "${sku}". Try /menu to see what is available.`;
+}
+
+/** Number the amounts so the customer can `pick by index` (e.g. "2"). */
+async function renderAmounts(sku: string, deps: RenderDeps): Promise<string> {
+    const res = await loadItem(sku, deps, 'send_amounts');
+    if (!res.ok) return res.message;
+    const { item } = res;
+    const lines = [`${item.label} - choose an amount:`, ''];
+    item.amounts.forEach((amt, i) => {
+        lines.push(`  ${i + 1}) ${amt} ${item.currency}`);
+    });
+    lines.push('');
+    lines.push('Reply with the number, e.g. "1".');
+    return lines.join('\n');
+}
+
+async function renderConfirmPrompt(
+    sku:         string,
+    amountIndex: number,
+    phone:       string,
+    deps:        RenderDeps,
+): Promise<string> {
+    const res = await loadItem(sku, deps, 'send_confirm_prompt');
+    if (!res.ok) return res.message;
+    const { item } = res;
+    const amount = item.amounts[amountIndex - 1];
+    if (!amount) {
+        return `That choice is outside the list (1 to ${item.amounts.length}). Reply /cancel and try /buy again.`;
     }
-    if (!item.amounts.length) {
-        return `${item.label} has no available amounts right now.`;
+    return `Confirm: ${item.label} ${amount} ${item.currency} -> ${phone}. Reply /confirm to proceed or /cancel to abort.`;
+}
+
+async function createInvoice(
+    sku:         string,
+    amountIndex: number,
+    phone:       string,
+    session:     CustomerSession,
+    deps:        RenderDeps,
+): Promise<string> {
+    const loaded = await loadItem(sku, deps, 'send_invoice');
+    if (!loaded.ok) return loaded.message;
+    const { item } = loaded;
+    const amount = item.amounts[amountIndex - 1];
+    if (!amount) {
+        return `That choice is outside the list (1 to ${item.amounts.length}). Reply /cancel and try /buy again.`;
     }
-    const amount = item.amounts[0]!;   // first available - cart UX still WIP
 
     const nostrOrderId = makeIdempotencyKey();
-    let res;
+    let order;
     try {
-        res = await deps.btcrecharge.createLightningOrder({
+        order = await deps.btcrecharge.createLightningOrder({
             nostrOrderId,
             operatorSlug:   item.operatorId,
             msisdn:         phone,
@@ -132,13 +180,13 @@ async function createInvoice(
         return 'Sorry, I could not create your invoice right now. Try again in a moment.';
     }
 
-    await deps.sessionStore.linkOrder(String(res.internalOrderId), session.pubkey);
+    await deps.sessionStore.linkOrder(String(order.internalOrderId), session.pubkey);
 
     return [
         `Order: ${item.label} ${amount} ${item.currency} -> ${phone}`,
-        `Amount: ${res.sats} sats`,
+        `Amount: ${order.sats} sats`,
         '',
-        res.lnInvoice,
+        order.lnInvoice,
         '',
         'Pay the Lightning invoice above. I will DM you once it is delivered.',
     ].join('\n');

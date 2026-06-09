@@ -82,7 +82,7 @@ test('send_invoice surfaces a user-visible message when catalog.getBySku throws'
     // silent catch-all and the customer saw no reply at all.
     const deps  = makeDeps({ catalogThrows: true });
     const reply = await actionToText(
-        { kind: 'send_invoice', sku: 'vodafone-romania', phone: '+40734145710' },
+        { kind: 'send_invoice', sku: 'vodafone-romania', amountIndex: 1, phone: '+40734145710' },
         makeSession(),
         deps,
     );
@@ -93,10 +93,60 @@ test('send_invoice surfaces a user-visible message when catalog.getBySku throws'
 test('send_invoice reports an unknown SKU when catalog returns null', async () => {
     const deps  = makeDeps({ catalogItem: null });
     const reply = await actionToText(
-        { kind: 'send_invoice', sku: 'nonexistent-xx', phone: '+40734145710' },
+        { kind: 'send_invoice', sku: 'nonexistent-xx', amountIndex: 1, phone: '+40734145710' },
         makeSession(),
         deps,
     );
     assert.ok(reply, 'reply must not be null');
     assert.match(reply, /Unknown SKU/);
+});
+
+// ----- amount selection (Phase 2.6) ---------------------------------
+
+const VODAFONE_RO_ITEM: CatalogItem = {
+    sku:        'vodafone-romania-ro',
+    operatorId: 'vodafone-romania',
+    label:      'Vodafone Romania',
+    country:    'RO',
+    currency:   'EUR',
+    amounts:    ['4.76', '6.95', '13.90', '27.80'],
+    inStock:    true,
+};
+
+test('send_amounts renders a numbered list keyed to the catalog order', async () => {
+    const deps  = makeDeps({ catalogItem: VODAFONE_RO_ITEM });
+    const reply = await actionToText({ kind: 'send_amounts', sku: 'vodafone-romania-ro' }, makeSession(), deps);
+    assert.ok(reply, 'reply must not be null');
+    // Each amount in the catalog row should appear as "N) <amount> <currency>".
+    assert.match(reply, /1\) 4\.76 EUR/);
+    assert.match(reply, /2\) 6\.95 EUR/);
+    assert.match(reply, /3\) 13\.90 EUR/);
+    assert.match(reply, /4\) 27\.80 EUR/);
+    assert.match(reply, /Reply with the number/);
+});
+
+test('send_confirm_prompt echoes the chosen amount so the customer can verify before /confirm', async () => {
+    const deps  = makeDeps({ catalogItem: VODAFONE_RO_ITEM });
+    const reply = await actionToText(
+        { kind: 'send_confirm_prompt', sku: 'vodafone-romania-ro', amountIndex: 3, phone: '+40734145710' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    // Index 3 means amounts[2] -> "13.90", not the first row (4.76) the
+    // pre-Phase-2.6 bot would have auto-picked.
+    assert.match(reply, /Vodafone Romania 13\.90 EUR -> \+40734145710/);
+    assert.match(reply, /\/confirm/);
+});
+
+test('send_confirm_prompt reports an out-of-range pick instead of silently substituting', async () => {
+    const deps  = makeDeps({ catalogItem: VODAFONE_RO_ITEM });
+    const reply = await actionToText(
+        { kind: 'send_confirm_prompt', sku: 'vodafone-romania-ro', amountIndex: 99, phone: '+40734145710' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /outside the list/i);
+    assert.match(reply, /1 to 4/);
 });
