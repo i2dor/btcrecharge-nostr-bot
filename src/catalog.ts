@@ -65,9 +65,20 @@ export interface CatalogItem {
     inStock:    boolean;
 }
 
-/** Countries we prefer for the launch catalog (Nostr-audience overlap). */
+/**
+ * Countries we prefer for the launch catalog. Originally the launch set was
+ * narrowed to Nostr-audience-overlap markets (IN/BR/NG/MX/SV/AR/KE/VN/ZA/ID)
+ * but live testing showed that Romanian users are buying for themselves
+ * with their own +40 numbers, and the EU corridor matters for the same
+ * diaspora-vs-home flows. Broaden the set; the per-country fetch is
+ * parallel + cached, so the extra countries cost ~3s on a cold refresh
+ * and 0s on every cached hit.
+ */
 export const DEFAULT_COUNTRIES: readonly string[] = [
+    // Nostr-native + remittance corridors
     'IN', 'BR', 'NG', 'MX', 'SV', 'AR', 'KE', 'VN', 'ZA', 'ID',
+    // EU / RO operator coverage (real-world users testing with own numbers)
+    'RO', 'DE', 'ES', 'IT', 'FR', 'GB', 'NL', 'PL',
 ];
 
 // ----- client --------------------------------------------------------
