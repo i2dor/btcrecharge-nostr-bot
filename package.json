@@ -1,0 +1,29 @@
+{
+  "name": "btcrecharge-nostr-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nostr DM bot for btcrecharge.com international mobile top-ups paid in Bitcoin and Lightning",
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev":   "tsx watch src/index.ts",
+    "lint":  "tsc -p tsconfig.json --noEmit",
+    "test":  "node --test --import tsx tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "ioredis":     "^5.4.1",
+    "nostr-tools": "^2.10.0",
+    "pino":        "^9.5.0",
+    "zod":         "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx":         "^4.19.2",
+    "typescript":  "^5.7.2"
+  }
+}
