@@ -275,14 +275,20 @@ export function renderMenu(items: readonly CatalogItem[], country?: string): str
         return lines.join('\n');
     }
 
-    // No country - show the country index so the customer can drill down.
-    const lines: string[] = ['Pick a country (then /buy):', ''];
-    const sorted = Array.from(byCountry.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    for (const [cc, rows] of sorted) {
-        const word = rows.length === 1 ? 'operator' : 'operators';
-        lines.push(`  ${countryFlag(cc)} ${cc}   ${String(rows.length).padStart(2)} ${word}    /menu ${cc}`);
-    }
-    lines.push('');
-    lines.push('Reply with /menu CC (e.g. /menu RO) to see operators.');
-    return lines.join('\n');
+    // Compact intro. Listing every country one-per-line was still too long
+    // (18 corridors -> 20+ lines per /menu). We surface a small hint set
+    // and the total count; the customer can /menu CC for any of the rest.
+    const all      = Array.from(byCountry.keys()).sort();
+    // Preference order favours likely-tested corridors first (operator
+    // testing with own RO number) then the diaspora-remittance set.
+    const preferred = ['RO', 'IN', 'BR', 'MX', 'DE', 'GB', 'NG', 'AR', 'KE', 'ID'];
+    const hints    = preferred.filter(cc => byCountry.has(cc)).slice(0, 5);
+    const hintLine = hints.length > 0 ? hints.map(cc => `/menu ${cc}`).join('  ') : '/menu RO';
+    return [
+        'Pick a country to see operators.',
+        '',
+        `Quick start: ${hintLine}`,
+        '',
+        `We cover ${all.length} countries total - use /menu CC for any.`,
+    ].join('\n');
 }

@@ -203,9 +203,10 @@ test('catalog: refresh throws when EVERY country fetch fails', async () => {
     await assert.rejects(client.refresh(), /every country fetch failed/);
 });
 
-test('renderMenu (no country): shows country index with operator counts and a drill-down hint', () => {
-    // The full per-operator dump was overwhelming customers (Phase 2.7 UX
-    // feedback). The default /menu view is now an index keyed by country.
+test('renderMenu (no country): compact intro - hint codes + total count, no per-country dump', () => {
+    // Listing all 18 countries one-per-line was still too long for a DM
+    // (Phase 2.7 -> 2.8 UX feedback). The default /menu view is now a
+    // 5-line intro: title, a few quick-start codes, and a count.
     const items = transformToCatalog([
         mkOp('airtel-in', 'IN', 'Airtel', [{ value: '5' }, { value: '10' }]),
         mkOp('jio-in',    'IN', 'Jio',    [{ value: '10' }]),
@@ -213,11 +214,14 @@ test('renderMenu (no country): shows country index with operator counts and a dr
     ]);
     const text = renderMenu(items);
     assert.match(text, /Pick a country/);
-    assert.match(text, /IN\s+2 operators/);
-    assert.match(text, /BR\s+1 operator\b/);
-    assert.match(text, /\/menu RO|\/menu CC|\/menu IN/);
-    // The per-operator SKUs should NOT leak into the country index.
+    assert.match(text, /Quick start.*\/menu IN.*\/menu BR/);
+    assert.match(text, /We cover 2 countries total/);
+    assert.match(text, /\/menu CC/);
+    // The per-operator SKUs and the per-country counts should NOT leak.
     assert.doesNotMatch(text, /airtel-in/);
+    assert.doesNotMatch(text, /\boperators\b/i);
+    // The intro should fit in well under 10 lines.
+    assert.ok(text.split('\n').length <= 8, `intro should be compact (was ${text.split('\n').length} lines)`);
 });
 
 test('renderMenu (country set): shows only that country\'s operators with SKUs', () => {
