@@ -14,7 +14,8 @@
     "dev":   "tsx watch src/index.ts",
     "lint":  "tsc -p tsconfig.json --noEmit",
     "test":  "node --test --import tsx tests/**/*.test.ts",
-    "publish-profile": "tsx scripts/publish-profile.ts"
+    "publish-profile": "tsx scripts/publish-profile.ts",
+    "delete-event":    "tsx scripts/delete-event.ts"
   },
   "dependencies": {
     "ioredis":     "^5.4.1",

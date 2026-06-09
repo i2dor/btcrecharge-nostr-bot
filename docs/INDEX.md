@@ -18,6 +18,8 @@ Pick the entry point that matches what you are trying to do.
 - [PROFILE-UPDATES.md](PROFILE-UPDATES.md) - update the bot's Nostr
   profile (about / picture / banner / nip05 / lud16) via the
   publish-profile script
+- [EVENT-DELETION.md](EVENT-DELETION.md) - retract a published event
+  via NIP-09 (kind 5 deletion request) with the delete-event script
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - known failure modes with
   recovery recipes, debugging cookbook
 
