@@ -174,6 +174,51 @@ test('fsm: pick_amount outside selecting_amount is ignored gracefully', () => {
     assert.equal(r.actions[0]!.kind, 'send_text');
 });
 
+test('parser: /menu without arg has no country (drill-down view)', () => {
+    const i = parseCommand('/menu', idle().flow);
+    assert.equal(i.kind, 'menu');
+    if (i.kind === 'menu') assert.equal(i.country, undefined);
+});
+
+test('parser: /menu RO carries the uppercased country code', () => {
+    const i = parseCommand('/menu ro', idle().flow);
+    assert.equal(i.kind, 'menu');
+    if (i.kind === 'menu') assert.equal(i.country, 'RO');
+});
+
+test('parser: /menu with a non-ISO-2 arg falls back to the index (no country)', () => {
+    const i = parseCommand('/menu romania', idle().flow);
+    assert.equal(i.kind, 'menu');
+    if (i.kind === 'menu') assert.equal(i.country, undefined);
+});
+
+test('parser: bare /status now parses as status with no orderId (was unknown, broke awaiting_payment)', () => {
+    const i = parseCommand('/status', idle().flow);
+    assert.equal(i.kind, 'status');
+    if (i.kind === 'status') assert.equal(i.orderId, undefined);
+});
+
+test('fsm: /menu RO carries the country through to send_menu', () => {
+    const r = transition(idle(), { kind: 'menu', country: 'RO' });
+    assert.equal(r.actions[0]!.kind, 'send_menu');
+    if (r.actions[0]!.kind === 'send_menu') assert.equal(r.actions[0]!.country, 'RO');
+});
+
+test('fsm: bare /status emits send_pending_orders instead of dead-ending in WAITING_PAY', () => {
+    // Regression for the "la /status -> I am waiting for your Lightning payment" bug.
+    // Customer in awaiting_payment used to get the WAITING_PAY nudge because the
+    // parser fell through to `unknown`. Now bare /status routes to a real action.
+    const s = inFlow('awaiting_payment', { sku: 'x', amountIndex: 1, phone: '+1' });
+    const r = transition(s, { kind: 'status' });
+    assert.equal(r.actions[0]!.kind, 'send_pending_orders');
+});
+
+test('fsm: /status <id> still routes to send_status with the explicit id', () => {
+    const r = transition(idle(), { kind: 'status', orderId: 'ord-42' });
+    assert.equal(r.actions[0]!.kind, 'send_status');
+    if (r.actions[0]!.kind === 'send_status') assert.equal(r.actions[0]!.orderId, 'ord-42');
+});
+
 test('fsm: unknown input in selecting_amount nudges to pick a number', () => {
     const s = inFlow('selecting_amount', { sku: 'x' });
     const r = transition(s, { kind: 'unknown', raw: 'huh?' });

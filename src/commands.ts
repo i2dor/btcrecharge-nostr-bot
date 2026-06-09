@@ -22,16 +22,16 @@ import type { CustomerSession, Flow } from './session.js';
 export type Intent =
     | { kind: 'start' }
     | { kind: 'help' }
-    | { kind: 'menu' }
+    | { kind: 'menu';        country?: string }
     | { kind: 'cart' }
     | { kind: 'clear' }
     | { kind: 'cancel' }
-    | { kind: 'buy';        sku: string }
+    | { kind: 'buy';         sku: string }
     | { kind: 'pick_amount'; index: number }
-    | { kind: 'status';     orderId: string }
-    | { kind: 'phone';      value: string }
+    | { kind: 'status';      orderId?: string }
+    | { kind: 'phone';       value: string }
     | { kind: 'confirm' }
-    | { kind: 'unknown';    raw: string };
+    | { kind: 'unknown';     raw: string };
 
 const SLASH_COMMANDS = new Set([
     'start', 'help', 'menu', 'cart', 'clear', 'cancel',
@@ -60,7 +60,13 @@ export function parseCommand(text: string, flow: Flow): Intent {
             switch (cmd) {
                 case 'start':   return { kind: 'start' };
                 case 'help':    return { kind: 'help' };
-                case 'menu':    return { kind: 'menu' };
+                case 'menu':    {
+                    // `/menu` -> country list; `/menu RO` -> operators in RO.
+                    if (!rest) return { kind: 'menu' };
+                    const cc = rest.toUpperCase();
+                    if (!/^[A-Z]{2}$/.test(cc)) return { kind: 'menu' }; // bad code -> show countries
+                    return { kind: 'menu', country: cc };
+                }
                 case 'cart':    return { kind: 'cart' };
                 case 'clear':   return { kind: 'clear' };
                 case 'cancel':  return { kind: 'cancel' };
@@ -71,7 +77,10 @@ export function parseCommand(text: string, flow: Flow): Intent {
                     if (!rest) return { kind: 'unknown', raw: trimmed };
                     return { kind: 'buy', sku: rest.toLowerCase() };
                 case 'status':
-                    if (!rest) return { kind: 'unknown', raw: trimmed };
+                    // `/status` alone -> summarise pending orders the bot
+                    // remembers for this customer; `/status <id>` looks up
+                    // a specific one.
+                    if (!rest) return { kind: 'status' };
                     return { kind: 'status', orderId: rest };
             }
         }
@@ -103,11 +112,12 @@ function normalizePhone(raw: string): string {
 export type Action =
     | { kind: 'send_text';           text: string }
     | { kind: 'send_help' }
-    | { kind: 'send_menu' }
+    | { kind: 'send_menu';           country?: string }
     | { kind: 'send_cart' }
     | { kind: 'send_amounts';        sku: string }
     | { kind: 'send_confirm_prompt'; sku: string; amountIndex: number; phone: string }
     | { kind: 'send_invoice';        sku: string; amountIndex: number; phone: string }
+    | { kind: 'send_pending_orders' }
     | { kind: 'send_status';         orderId: string };
 
 export interface TransitionResult {
@@ -150,6 +160,11 @@ export function transition(session: CustomerSession, intent: Intent): Transition
         case 'cancel':
             return { session: idle(session), actions: [{ kind: 'send_text', text: CANCELLED }] };
         case 'status':
+            // Bare /status: show what we remember instead of dead-ending
+            // the customer in their awaiting_payment flow.
+            if (!intent.orderId) {
+                return { session, actions: [{ kind: 'send_pending_orders' }] };
+            }
             return { session, actions: [{ kind: 'send_status', orderId: intent.orderId }] };
     }
 
@@ -158,7 +173,7 @@ export function transition(session: CustomerSession, intent: Intent): Transition
         case 'menu':
             return {
                 session: { ...session, flow: { type: 'selecting_carrier', ctx: {} } },
-                actions: [{ kind: 'send_menu' }],
+                actions: [{ kind: 'send_menu', ...(intent.country ? { country: intent.country } : {}) }],
             };
 
         case 'buy':

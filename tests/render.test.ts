@@ -139,6 +139,25 @@ test('send_confirm_prompt echoes the chosen amount so the customer can verify be
     assert.match(reply, /\/confirm/);
 });
 
+test('send_pending_orders empty: tells the customer they have no orders in flight', async () => {
+    const deps    = makeDeps();
+    const session = makeSession();
+    session.pendingOrderIds = [];
+    const reply = await actionToText({ kind: 'send_pending_orders' }, session, deps);
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /No orders in flight/i);
+});
+
+test('send_pending_orders non-empty: lists each remembered order ID', async () => {
+    const deps    = makeDeps();
+    const session = makeSession();
+    session.pendingOrderIds = ['1015', '1019'];
+    const reply = await actionToText({ kind: 'send_pending_orders' }, session, deps);
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /Order 1015/);
+    assert.match(reply, /Order 1019/);
+});
+
 test('send_confirm_prompt reports an out-of-range pick instead of silently substituting', async () => {
     const deps  = makeDeps({ catalogItem: VODAFONE_RO_ITEM });
     const reply = await actionToText(

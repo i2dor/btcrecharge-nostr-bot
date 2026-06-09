@@ -242,23 +242,47 @@ export function transformToCatalog(raw: readonly RawOperator[]): CatalogItem[] {
         }));
 }
 
-/** Render the catalog as a Nostr-friendly /menu reply. */
-export function renderMenu(items: readonly CatalogItem[]): string {
+/**
+ * Render the catalog as a Nostr-friendly /menu reply.
+ *
+ * - `country` omitted: a compact list of countries with operator counts.
+ *   The full per-operator dump was overwhelming customers, so the default
+ *   view is now a drill-down hint.
+ * - `country` set (ISO-2): only operators in that country, with SKUs.
+ */
+export function renderMenu(items: readonly CatalogItem[], country?: string): string {
     if (items.length === 0) return 'Catalog is empty right now. Try again in a minute.';
     const byCountry = new Map<string, CatalogItem[]>();
     for (const it of items) {
         const arr = byCountry.get(it.country);
         if (arr) arr.push(it); else byCountry.set(it.country, [it]);
     }
-    const lines: string[] = ['Top-ups available:', ''];
-    for (const [cc, rows] of byCountry) {
-        lines.push(`${countryFlag(cc)} ${cc}`);
+
+    if (country) {
+        const cc   = country.toUpperCase();
+        const rows = byCountry.get(cc);
+        if (!rows || rows.length === 0) {
+            const available = Array.from(byCountry.keys()).sort().join(', ');
+            return `No operators for ${cc}. Available countries: ${available}.`;
+        }
+        const lines: string[] = [`${countryFlag(cc)} ${cc} operators:`, ''];
         for (const row of rows) {
             const amts = row.amounts.slice(0, 6).join(' / ');
             lines.push(`  ${row.sku.padEnd(28)} ${row.label}  [${amts}${row.amounts.length > 6 ? ' ...' : ''}] ${row.currency}`);
         }
         lines.push('');
+        lines.push('Use /buy <sku> to start.');
+        return lines.join('\n');
     }
-    lines.push('Use /buy <sku> to start.');
+
+    // No country - show the country index so the customer can drill down.
+    const lines: string[] = ['Pick a country (then /buy):', ''];
+    const sorted = Array.from(byCountry.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [cc, rows] of sorted) {
+        const word = rows.length === 1 ? 'operator' : 'operators';
+        lines.push(`  ${countryFlag(cc)} ${cc}   ${String(rows.length).padStart(2)} ${word}    /menu ${cc}`);
+    }
+    lines.push('');
+    lines.push('Reply with /menu CC (e.g. /menu RO) to see operators.');
     return lines.join('\n');
 }

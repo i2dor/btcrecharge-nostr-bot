@@ -56,11 +56,22 @@ export async function actionToText(
         case 'send_menu': {
             try {
                 const items = await deps.catalog.list();
-                return renderMenu(items);
+                return renderMenu(items, action.country);
             } catch (err) {
                 deps.logger.error({ err: String(err) }, 'catalog list failed');
                 return 'Catalog is temporarily unavailable. Try again in a minute.';
             }
+        }
+
+        case 'send_pending_orders': {
+            if (session.pendingOrderIds.length === 0) {
+                return 'No orders in flight. /menu to start one, or /status <id> to look up a specific order.';
+            }
+            const lines = ['Your pending orders:'];
+            for (const id of session.pendingOrderIds) {
+                lines.push(`  Order ${id}  - I will DM you when it changes state.`);
+            }
+            return lines.join('\n');
         }
 
         case 'send_cart': {
@@ -180,15 +191,29 @@ async function createInvoice(
         return 'Sorry, I could not create your invoice right now. Try again in a moment.';
     }
 
-    await deps.sessionStore.linkOrder(String(order.internalOrderId), session.pubkey);
+    const orderIdStr = String(order.internalOrderId);
+    await deps.sessionStore.linkOrder(orderIdStr, session.pubkey);
+    // Also append to pendingOrderIds so a bare /status can summarise it.
+    // Best-effort: a failed mutate (race with another DM) is tolerable - the
+    // reverse index above is the authoritative customer<->order link.
+    try {
+        await deps.sessionStore.mutate(session.pubkey, (s) => ({
+            ...s,
+            pendingOrderIds: s.pendingOrderIds.includes(orderIdStr)
+                ? s.pendingOrderIds
+                : [...s.pendingOrderIds, orderIdStr],
+        }));
+    } catch (err) {
+        deps.logger.warn({ err: String(err), orderId: orderIdStr }, 'pendingOrderIds mutate failed (non-fatal)');
+    }
 
     return [
-        `Order: ${item.label} ${amount} ${item.currency} -> ${phone}`,
+        `Order ${orderIdStr}: ${item.label} ${amount} ${item.currency} -> ${phone}`,
         `Amount: ${order.sats} sats`,
         '',
         order.lnInvoice,
         '',
-        'Pay the Lightning invoice above. I will DM you once it is delivered.',
+        `Pay the Lightning invoice above. I will DM you once it is delivered. /status ${orderIdStr} to check.`,
     ].join('\n');
 }
 

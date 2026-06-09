@@ -203,18 +203,40 @@ test('catalog: refresh throws when EVERY country fetch fails', async () => {
     await assert.rejects(client.refresh(), /every country fetch failed/);
 });
 
-test('renderMenu: groups by country, lists amounts, prompts /buy', () => {
+test('renderMenu (no country): shows country index with operator counts and a drill-down hint', () => {
+    // The full per-operator dump was overwhelming customers (Phase 2.7 UX
+    // feedback). The default /menu view is now an index keyed by country.
+    const items = transformToCatalog([
+        mkOp('airtel-in', 'IN', 'Airtel', [{ value: '5' }, { value: '10' }]),
+        mkOp('jio-in',    'IN', 'Jio',    [{ value: '10' }]),
+        mkOp('vivo-br',   'BR', 'Vivo',   [{ value: '10' }]),
+    ]);
+    const text = renderMenu(items);
+    assert.match(text, /Pick a country/);
+    assert.match(text, /IN\s+2 operators/);
+    assert.match(text, /BR\s+1 operator\b/);
+    assert.match(text, /\/menu RO|\/menu CC|\/menu IN/);
+    // The per-operator SKUs should NOT leak into the country index.
+    assert.doesNotMatch(text, /airtel-in/);
+});
+
+test('renderMenu (country set): shows only that country\'s operators with SKUs', () => {
     const items = transformToCatalog([
         mkOp('airtel-in', 'IN', 'Airtel', [{ value: '5' }, { value: '10' }]),
         mkOp('vivo-br',   'BR', 'Vivo',   [{ value: '10' }]),
     ]);
-    const text = renderMenu(items);
-    assert.match(text, /Top-ups available/);
-    assert.match(text, /IN\b/);
-    assert.match(text, /BR\b/);
+    const text = renderMenu(items, 'IN');
+    assert.match(text, /IN operators/);
     assert.match(text, /airtel-in/);
-    assert.match(text, /vivo-br/);
     assert.match(text, /Use \/buy/);
+    assert.doesNotMatch(text, /vivo-br/);
+});
+
+test('renderMenu (unknown country): lists available countries instead of an empty body', () => {
+    const items = transformToCatalog([mkOp('airtel-in', 'IN', 'Airtel', [{ value: '5' }])]);
+    const text = renderMenu(items, 'ZZ');
+    assert.match(text, /No operators for ZZ/);
+    assert.match(text, /Available countries.*IN/);
 });
 
 test('renderMenu: empty input produces a friendly fallback', () => {
