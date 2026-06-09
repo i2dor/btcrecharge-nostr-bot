@@ -285,7 +285,7 @@ export function renderMenu(items: readonly CatalogItem[], country?: string): str
     const hints    = preferred.filter(cc => byCountry.has(cc)).slice(0, 5);
     const hintLine = hints.length > 0 ? hints.map(cc => `/menu ${cc}`).join('  ') : '/menu RO';
     return [
-        'Pick a country to see operators.',
+        'Pick a country:',
         '',
         `Quick start: ${hintLine}`,
         '',
