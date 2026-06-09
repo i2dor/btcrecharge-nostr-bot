@@ -15,6 +15,7 @@ import Redis from 'ioredis';
 import { type Filter } from 'nostr-tools';
 
 import { BtcrechargeClient } from './btcrecharge-client.js';
+import { resolveCallbackUrl } from './callback-url.js';
 import { CatalogClient } from './catalog.js';
 import { getConfig } from './config.js';
 import { handleIncomingDm } from './handler.js';
@@ -68,6 +69,22 @@ async function main(): Promise<void> {
         since,
     };
 
+    const callbackUrl = resolveCallbackUrl({
+        botPublicUrl:        cfg.botPublicUrl,
+        railwayPublicDomain: process.env['RAILWAY_PUBLIC_DOMAIN'],
+        port:                cfg.port,
+    });
+    log.info({ callbackUrl }, 'callback URL resolved');
+    // Loud warning so the operator notices in Railway logs if the bot is
+    // about to give btcrecharge a useless localhost URL.
+    if (callbackUrl.startsWith('http://localhost')) {
+        log.warn(
+            'callback URL is localhost - btcrecharge will not be able to ' +
+            'deliver order callbacks. Set BOT_PUBLIC_URL or generate a ' +
+            'Railway public domain so RAILWAY_PUBLIC_DOMAIN is populated.',
+        );
+    }
+
     relayPool.subscribe(filter, (event) => {
         void handleIncomingDm(event, {
             botSecret:    id.secret,
@@ -75,7 +92,7 @@ async function main(): Promise<void> {
             catalog,
             btcrecharge,
             relayPool,
-            callbackUrl:  buildCallbackUrl(cfg.port),
+            callbackUrl,
             minPowBits:   0, // disabled by default for MVP
             logger:       log,
         });
@@ -106,15 +123,6 @@ async function main(): Promise<void> {
 /** Mask password in a redis:// URL so we can log it safely. */
 function maskRedisUrl(url: string): string {
     return url.replace(/(rediss?:\/\/[^:]*:)[^@]*(@)/, '$1***$2');
-}
-
-function buildCallbackUrl(port: number): string {
-    // Railway exposes the service over the public Railway domain; in
-    // production we expect RAILWAY_PUBLIC_DOMAIN to be set. Locally the
-    // fallback to localhost lets the smoke tests work without changes.
-    const domain = process.env['RAILWAY_PUBLIC_DOMAIN'];
-    if (domain) return `https://${domain}/webhook/order`;
-    return `http://localhost:${port}/webhook/order`;
 }
 
 main().catch((err) => {

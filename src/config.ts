@@ -21,6 +21,11 @@ const Schema = z.object({
     PORT:                 z.coerce.number().int().positive().default(3000),
     LOG_LEVEL:            z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
     APP_ENV:              z.enum(['development', 'test', 'staging', 'production']).default('development'),
+    // Public origin btcrecharge can POST callbacks to. When set, it wins over
+    // the Railway-injected RAILWAY_PUBLIC_DOMAIN and the localhost fallback.
+    // Set this to e.g. `https://btcrecharge-nostr-bot.up.railway.app` once
+    // you have generated a public domain for the service.
+    BOT_PUBLIC_URL:       z.string().url().optional(),
 });
 
 export interface Config {
@@ -32,6 +37,7 @@ export interface Config {
     port:               number;
     logLevel:           'trace' | 'debug' | 'info' | 'warn' | 'error';
     appEnv:             'development' | 'test' | 'staging' | 'production';
+    botPublicUrl:       string | undefined;
 }
 
 let cached: Config | null = null;
@@ -48,6 +54,7 @@ export function getConfig(): Config {
         port:               parsed.PORT,
         logLevel:           parsed.LOG_LEVEL,
         appEnv:             parsed.APP_ENV,
+        botPublicUrl:       parsed.BOT_PUBLIC_URL?.replace(/\/$/, ''),
     };
     return cached;
 }
