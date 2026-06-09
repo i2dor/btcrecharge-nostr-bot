@@ -12,7 +12,12 @@ const Schema = z.object({
     NOSTR_PROXY_SECRET:   z.string({ required_error: 'NOSTR_PROXY_SECRET must be 64 hex' }).regex(/^[0-9a-f]{64}$/i, 'NOSTR_PROXY_SECRET must be 64 hex'),
     BTCRECHARGE_BASE_URL: z.string().url().default('https://btcrecharge.com'),
     NOSTR_RELAYS:         z.string().min(1).default('wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social'),
-    REDIS_URL:            z.string().url().default('redis://localhost:6379'),
+    // Railway internal hostnames (redis-volume.railway.internal) parse fine
+    // as URLs, but zod's url() rejects values containing dots-as-tld when
+    // the host lacks a public suffix. Relax to "starts with redis://" so
+    // ioredis itself surfaces a useful error if the URL is malformed
+    // instead of a cryptic 'Invalid url' at boot.
+    REDIS_URL:            z.string().regex(/^rediss?:\/\//i, 'REDIS_URL must start with redis:// or rediss://').default('redis://localhost:6379'),
     PORT:                 z.coerce.number().int().positive().default(3000),
     LOG_LEVEL:            z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
     APP_ENV:              z.enum(['development', 'test', 'staging', 'production']).default('development'),

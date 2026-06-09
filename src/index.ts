@@ -30,11 +30,12 @@ async function main(): Promise<void> {
     const log = getLogger();
 
     log.info({
-        npub:    id.npub,
-        pubkey:  id.pubkey.slice(0, 16) + '...',
-        env:     cfg.appEnv,
-        relays:  cfg.nostrRelays.length,
-        backend: cfg.btcrechargeBaseUrl,
+        npub:     id.npub,
+        pubkey:   id.pubkey.slice(0, 16) + '...',
+        env:      cfg.appEnv,
+        relays:   cfg.nostrRelays.length,
+        backend:  cfg.btcrechargeBaseUrl,
+        redisUrl: maskRedisUrl(cfg.redisUrl),
     }, 'bot booting');
 
     const redis = new Redis(cfg.redisUrl, {
@@ -100,6 +101,11 @@ async function main(): Promise<void> {
     };
     process.on('SIGINT',  () => void shutdown('SIGINT'));
     process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}
+
+/** Mask password in a redis:// URL so we can log it safely. */
+function maskRedisUrl(url: string): string {
+    return url.replace(/(rediss?:\/\/[^:]*:)[^@]*(@)/, '$1***$2');
 }
 
 function buildCallbackUrl(port: number): string {
