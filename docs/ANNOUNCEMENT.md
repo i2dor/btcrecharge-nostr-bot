@@ -7,7 +7,8 @@ No website checkout. No signup. No KYC. No platform that can change its
 mind tomorrow.
 
 Verify the bot via NIP-05 at `bot@btcrecharge.com`, or paste the npub
-into your Nostr client and DM `/start`.
+`npub1zgzksmumsy5q3tq3ywzj6trmdehfvlhts6lpx9799wqz862qr4nqljlucd` into
+your Nostr client and DM `/start`.
 
 ## What it does
 
@@ -136,11 +137,16 @@ TTL.
 
 ## Open source
 
-The bot code is on GitHub at `i2dor/btcrecharge-nostr-bot`
-(TypeScript) and the payment backend at `i2dor/btcrecharge` (PHP).
-See each repo for the licence.
+The bot is open source under the MIT licence:
+https://github.com/i2dor/btcrecharge-nostr-bot
 
-Documentation lives under `docs/` in the bot repo: SETUP, DEPLOY,
+That is the TypeScript code for the Nostr-facing side - relay pool,
+NIP-04 + NIP-17 dual encryption, FSM, refund-address capture, the
+publish-profile + delete-event CLIs. The PHP payment backend
+(BTCPay client, supplier integration, pricing engine) is operational
+infrastructure and stays private.
+
+Documentation lives under `docs/` in the repo: SETUP, DEPLOY,
 ARCHITECTURE, OPERATIONS, COMMANDS-AND-FLOWS, TROUBLESHOOTING. The
 TROUBLESHOOTING.md has eight named incident recipes derived from real
 bugs we hit during launch week. If you are building a Nostr commerce
