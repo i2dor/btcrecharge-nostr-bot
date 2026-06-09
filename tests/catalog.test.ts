@@ -224,7 +224,7 @@ test('renderMenu (no country): compact intro - hint codes + total count, no per-
     assert.ok(text.split('\n').length <= 8, `intro should be compact (was ${text.split('\n').length} lines)`);
 });
 
-test('renderMenu (country set): shows only that country\'s operators with SKUs', () => {
+test('renderMenu (country set): shows only that country\'s operators with SKUs + a concrete example', () => {
     const items = transformToCatalog([
         mkOp('airtel-in', 'IN', 'Airtel', [{ value: '5' }, { value: '10' }]),
         mkOp('vivo-br',   'BR', 'Vivo',   [{ value: '10' }]),
@@ -232,7 +232,10 @@ test('renderMenu (country set): shows only that country\'s operators with SKUs',
     const text = renderMenu(items, 'IN');
     assert.match(text, /IN operators/);
     assert.match(text, /airtel-in/);
-    assert.match(text, /Use \/buy/);
+    // The example must use a real listed SKU, not the "<sku>" placeholder
+    // customers were copy-pasting verbatim.
+    assert.match(text, /Example: Use "\/buy airtel-in" to start\./);
+    assert.doesNotMatch(text, /<sku>/);
     assert.doesNotMatch(text, /vivo-br/);
 });
 

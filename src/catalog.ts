@@ -271,7 +271,11 @@ export function renderMenu(items: readonly CatalogItem[], country?: string): str
             lines.push(`  ${row.sku.padEnd(28)} ${row.label}  [${amts}${row.amounts.length > 6 ? ' ...' : ''}] ${row.currency}`);
         }
         lines.push('');
-        lines.push('Use /buy <sku> to start.');
+        // Customers were copy-pasting "<sku>" verbatim. Show a concrete
+        // example using the first operator in this country so the format
+        // is unambiguous.
+        const exampleSku = rows[0]!.sku;
+        lines.push(`Example: Use "/buy ${exampleSku}" to start.`);
         return lines.join('\n');
     }
 
