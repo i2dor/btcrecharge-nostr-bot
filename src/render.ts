@@ -92,6 +92,9 @@ export async function actionToText(
         case 'send_invoice':
             return createInvoice(action.sku, action.amountIndex, action.phone, session, deps);
 
+        case 'submit_refund_address':
+            return submitRefundAddress(action.orderId, action.address, deps);
+
         case 'send_status':
             // Real status lookup lands later; for now acknowledge the request
             // so the customer is not left in silence. The webhook callback is
@@ -222,4 +225,55 @@ function makeIdempotencyKey(): string {
     // crypto.randomUUID gives us 32 hex + 4 hyphens = 36 chars.
     // The 'nostr-' prefix keeps the source channel obvious in admin logs.
     return 'nostr-' + crypto.randomUUID();
+}
+
+/**
+ * Send a Lightning address to btcrecharge for a refund_pending order.
+ *
+ * Failure-mode mapping:
+ *   - `unreachable_address` (probe failed)        -> ask for another address
+ *   - `bad_address`         (regex / decode fail) -> same
+ *   - `order_not_refundable` (state moved on)    -> tell the customer
+ *   - `not_refund_pending`   (timing race)        -> same as above
+ *   - other 4xx                                  -> generic retry-with-different
+ *   - 5xx / network                               -> ask to retry shortly
+ *
+ * Stays in the FSM's awaiting_refund_address regardless of outcome here;
+ * the backend confirms the refund out-of-band via the `refunded`
+ * webhook, at which point we DM "Refund sent."
+ */
+async function submitRefundAddress(
+    orderId: string,
+    address: string,
+    deps:    RenderDeps,
+): Promise<string> {
+    const numericOrderId = parseInt(orderId, 10);
+    if (!Number.isFinite(numericOrderId) || numericOrderId <= 0) {
+        deps.logger.error({ orderId }, 'refund address forwarded with non-numeric orderId');
+        return 'Something is off with that order id. Please contact support.';
+    }
+    try {
+        await deps.btcrecharge.submitRefundAddress({
+            internalOrderId: numericOrderId,
+            address,
+        });
+        return `Thanks. I am verifying ${address} now and will DM you once the refund is on the way.`;
+    } catch (err) {
+        if (err instanceof BtcrechargeApiError) {
+            switch (err.code) {
+                case 'unreachable_address':
+                case 'bad_address':
+                    return 'That Lightning address does not seem reachable. Please reply with a different one (e.g. alice@walletofsatoshi.com or lnurl1...).';
+                case 'order_not_refundable':
+                case 'not_refund_pending':
+                    return 'That order is no longer in refund_pending state. /status to see your orders, or wait for the next DM from me.';
+            }
+            // Other 4xx: surface the detail if it is short and safe.
+            if (err.status >= 400 && err.status < 500) {
+                return 'I could not accept that address. Please try a different Lightning address or LNURL.';
+            }
+        }
+        deps.logger.error({ err: String(err), orderId }, 'refund address submit failed');
+        return 'Could not reach the refund service right now. Please reply with the same address in a minute and I will try again.';
+    }
 }

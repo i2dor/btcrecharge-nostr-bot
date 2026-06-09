@@ -22,23 +22,34 @@ import type { CustomerSession, Flow } from './session.js';
 export type Intent =
     | { kind: 'start' }
     | { kind: 'help' }
-    | { kind: 'menu';        country?: string }
+    | { kind: 'menu';           country?: string }
     | { kind: 'cart' }
     | { kind: 'clear' }
     | { kind: 'cancel' }
-    | { kind: 'buy';         sku: string }
-    | { kind: 'pick_amount'; index: number }
-    | { kind: 'status';      orderId?: string }
-    | { kind: 'phone';       value: string }
+    | { kind: 'buy';            sku: string }
+    | { kind: 'pick_amount';    index: number }
+    | { kind: 'status';         orderId?: string }
+    | { kind: 'phone';          value: string }
+    | { kind: 'ln_address';     value: string }
     | { kind: 'confirm' }
-    | { kind: 'unknown';     raw: string };
+    | { kind: 'unknown';        raw: string };
 
 const SLASH_COMMANDS = new Set([
     'start', 'help', 'menu', 'cart', 'clear', 'cancel',
     'buy',   'status', 'yes', 'no', 'confirm',
 ]);
 
-const PHONE_RE = /^\+?[0-9][0-9\s\-()]{3,20}$/;
+const PHONE_RE       = /^\+?[0-9][0-9\s\-()]{3,20}$/;
+// Lightning address per LUD-16: localpart @ host. We allow the chars
+// emails commonly use, then a host with at least one dot and a TLD of
+// >=2 alpha chars. Case-insensitive at the regex level; we lowercase
+// before storage so a stray uppercase does not split into two refund
+// targets in our index.
+const LN_ADDRESS_RE  = /^[a-z0-9._+-]{1,64}@([a-z0-9-]+\.)+[a-z]{2,}$/i;
+// LNURL-pay per NIP-19 / LUD-17 - bech32 starting with `lnurl1`. The
+// alphabet excludes `1bio`; we keep the length floor at 40 to avoid
+// false positives on short pasted strings.
+const LNURL_RE       = /^lnurl1[02-9ac-hj-np-z]{40,}$/i;
 
 /**
  * Parse a single DM into an Intent. The current flow state is used only
@@ -99,6 +110,16 @@ export function parseCommand(text: string, flow: Flow): Intent {
         if (lower === 'yes' || lower === 'y' || lower === 'ok') return { kind: 'confirm' };
         if (lower === 'no'  || lower === 'n')                   return { kind: 'cancel' };
     }
+    // Lightning address / LNURL-pay are recognised in ANY flow so a
+    // customer who left awaiting_refund_address (e.g. browsed /menu)
+    // can still paste an address later; the transition then matches it
+    // against the most recent refund_pending order in their session.
+    if (LN_ADDRESS_RE.test(trimmed)) {
+        return { kind: 'ln_address', value: trimmed.toLowerCase() };
+    }
+    if (LNURL_RE.test(trimmed)) {
+        return { kind: 'ln_address', value: trimmed.toLowerCase() };
+    }
     return { kind: 'unknown', raw: trimmed };
 }
 
@@ -110,15 +131,16 @@ function normalizePhone(raw: string): string {
 // ----- FSM (transition output) --------------------------------------
 
 export type Action =
-    | { kind: 'send_text';           text: string }
+    | { kind: 'send_text';            text: string }
     | { kind: 'send_help' }
-    | { kind: 'send_menu';           country?: string }
+    | { kind: 'send_menu';            country?: string }
     | { kind: 'send_cart' }
-    | { kind: 'send_amounts';        sku: string }
-    | { kind: 'send_confirm_prompt'; sku: string; amountIndex: number; phone: string }
-    | { kind: 'send_invoice';        sku: string; amountIndex: number; phone: string }
+    | { kind: 'send_amounts';         sku: string }
+    | { kind: 'send_confirm_prompt';  sku: string; amountIndex: number; phone: string }
+    | { kind: 'send_invoice';         sku: string; amountIndex: number; phone: string }
     | { kind: 'send_pending_orders' }
-    | { kind: 'send_status';         orderId: string };
+    | { kind: 'submit_refund_address'; orderId: string; address: string }
+    | { kind: 'send_status';          orderId: string };
 
 export interface TransitionResult {
     session: CustomerSession;
@@ -133,6 +155,8 @@ const WAITING_PAY    = 'I am waiting for your Lightning payment. Reply /cancel t
 const CANCELLED      = 'Cancelled. Reply /menu to start over.';
 const CART_CLEARED   = 'Cart cleared. Reply /menu to start over.';
 const UNKNOWN        = 'Sorry, I did not catch that. Reply /help for the command list.';
+const REFUND_NOT_EXPECTED = 'I am not expecting a Lightning address right now. If you have a refund pending, /status to see your orders first.';
+const REFUND_PROMPT_AGAIN = 'That does not look like a Lightning address or LNURL. Reply with e.g. alice@walletofsatoshi.com or lnurl1...';
 
 /**
  * Apply an intent to the current session and return the next session
@@ -239,9 +263,42 @@ export function transition(session: CustomerSession, intent: Intent): Transition
             };
         }
 
+        case 'ln_address': {
+            // Pick which refund_pending order this address is for:
+            //   1. If the customer is currently in awaiting_refund_address
+            //      with a ctx.orderId, that wins (they were just prompted).
+            //   2. Otherwise, the most recently added refund_pending order
+            //      (last element of the list) - newest refund problems are
+            //      the most urgent.
+            //   3. Otherwise reject with a clear nudge.
+            let orderId: string | undefined;
+            if (session.flow.type === 'awaiting_refund_address') {
+                orderId = (session.flow.ctx as { orderId?: string }).orderId;
+            }
+            if (!orderId && session.refundPendingOrderIds.length > 0) {
+                orderId = session.refundPendingOrderIds[session.refundPendingOrderIds.length - 1];
+            }
+            if (!orderId) {
+                return { session, actions: [{ kind: 'send_text', text: REFUND_NOT_EXPECTED }] };
+            }
+            // Stay in awaiting_refund_address until the backend confirms;
+            // a probe failure on btcrecharge bounces back as a render-time
+            // user message and the customer can try again.
+            return {
+                session: {
+                    ...session,
+                    flow: { type: 'awaiting_refund_address', ctx: { orderId } },
+                },
+                actions: [{ kind: 'submit_refund_address', orderId, address: intent.value }],
+            };
+        }
+
         case 'unknown':
             if (session.flow.type === 'awaiting_payment') {
                 return { session, actions: [{ kind: 'send_text', text: WAITING_PAY }] };
+            }
+            if (session.flow.type === 'awaiting_refund_address') {
+                return { session, actions: [{ kind: 'send_text', text: REFUND_PROMPT_AGAIN }] };
             }
             if (session.flow.type === 'selecting_amount') {
                 return {

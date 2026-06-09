@@ -80,6 +80,81 @@ test('parser: gibberish becomes unknown', () => {
     assert.equal(parseCommand('asdf qwer', idle().flow).kind, 'unknown');
 });
 
+// ----- Phase 3: Lightning address / LNURL parsing --------------------
+
+test('parser: Lightning address (LUD-16) is recognised in ANY flow', () => {
+    // Customers can paste an address mid-/menu / mid-idle; FSM routes
+    // it against pendingRefundOrderIds, parser does not gate on flow.
+    for (const flow of [idle().flow, inFlow('awaiting_refund_address', { orderId: '42' }).flow, inFlow('selecting_amount', { sku: 'x' }).flow]) {
+        const i = parseCommand('alice@walletofsatoshi.com', flow);
+        assert.equal(i.kind, 'ln_address', `flow ${flow.type} should still recognise the address`);
+        if (i.kind === 'ln_address') assert.equal(i.value, 'alice@walletofsatoshi.com');
+    }
+});
+
+test('parser: Lightning address is lowercased on storage', () => {
+    const i = parseCommand('ALICE@WalletOfSatoshi.COM', idle().flow);
+    assert.equal(i.kind, 'ln_address');
+    if (i.kind === 'ln_address') assert.equal(i.value, 'alice@walletofsatoshi.com');
+});
+
+test('parser: LNURL-pay bech32 is recognised as ln_address', () => {
+    const lnurl = 'lnurl1' + 'q'.repeat(60);
+    const i = parseCommand(lnurl, idle().flow);
+    assert.equal(i.kind, 'ln_address');
+    if (i.kind === 'ln_address') assert.equal(i.value, lnurl);
+});
+
+test('parser: invalid Lightning address (no TLD) falls through to unknown', () => {
+    assert.equal(parseCommand('alice@host', idle().flow).kind, 'unknown');
+});
+
+// ----- Phase 3: ln_address routing in the FSM ------------------------
+
+test('fsm: ln_address in awaiting_refund_address uses ctx.orderId', () => {
+    const s = inFlow('awaiting_refund_address', { orderId: '1042' });
+    const r = transition(s, { kind: 'ln_address', value: 'alice@walletofsatoshi.com' });
+    assert.equal(r.session.flow.type, 'awaiting_refund_address');
+    assert.equal((r.session.flow.ctx as { orderId?: string }).orderId, '1042');
+    assert.equal(r.actions[0]!.kind, 'submit_refund_address');
+    if (r.actions[0]!.kind === 'submit_refund_address') {
+        assert.equal(r.actions[0]!.orderId, '1042');
+        assert.equal(r.actions[0]!.address, 'alice@walletofsatoshi.com');
+    }
+});
+
+test('fsm: ln_address outside that flow uses the most recent refundPendingOrderIds entry', () => {
+    const s: CustomerSession = {
+        ...inFlow('idle'),
+        refundPendingOrderIds: ['1015', '1042'],   // 1042 is newer / more urgent
+    };
+    const r = transition(s, { kind: 'ln_address', value: 'alice@walletofsatoshi.com' });
+    assert.equal(r.actions[0]!.kind, 'submit_refund_address');
+    if (r.actions[0]!.kind === 'submit_refund_address') {
+        assert.equal(r.actions[0]!.orderId, '1042');
+    }
+    // Flow flips into awaiting_refund_address so a follow-up "+1042 ok"
+    // type message is parsed against the right context.
+    assert.equal(r.session.flow.type, 'awaiting_refund_address');
+});
+
+test('fsm: ln_address with no refund_pending order at all rejects with a clear nudge', () => {
+    const r = transition(idle(), { kind: 'ln_address', value: 'alice@walletofsatoshi.com' });
+    assert.equal(r.actions[0]!.kind, 'send_text');
+    if (r.actions[0]!.kind === 'send_text') {
+        assert.match(r.actions[0]!.text, /not expecting a Lightning address/i);
+    }
+});
+
+test('fsm: unknown input in awaiting_refund_address re-prompts with the expected formats', () => {
+    const s = inFlow('awaiting_refund_address', { orderId: '1042' });
+    const r = transition(s, { kind: 'unknown', raw: 'something else' });
+    assert.equal(r.actions[0]!.kind, 'send_text');
+    if (r.actions[0]!.kind === 'send_text') {
+        assert.match(r.actions[0]!.text, /Lightning address or LNURL/);
+    }
+});
+
 // ------------------------------------------------------------------
 // transition - universal commands
 // ------------------------------------------------------------------

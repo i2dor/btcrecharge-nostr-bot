@@ -14,20 +14,21 @@ import pino from 'pino';
 
 import { actionToText, type RenderDeps } from '../src/render.js';
 import type { CatalogClient, CatalogItem } from '../src/catalog.js';
-import type { BtcrechargeClient } from '../src/btcrecharge-client.js';
+import { BtcrechargeApiError, type BtcrechargeClient } from '../src/btcrecharge-client.js';
 import type { CustomerSession, SessionStore } from '../src/session.js';
 
 const SILENT = pino({ level: 'silent' });
 
 function makeSession(): CustomerSession {
     return {
-        pubkey:          'a'.repeat(64),
-        protocol:        'nip04',
-        flow:            { type: 'idle', ctx: {} },
-        cart:            [],
-        pendingOrderIds: [],
-        rateLimit:       { bucket: 10, lastRefill: 0 },
-        metadata:        { firstSeen: 0, lastSeen: 0, totalOrders: 0 },
+        pubkey:                'a'.repeat(64),
+        protocol:              'nip04',
+        flow:                  { type: 'idle', ctx: {} },
+        cart:                  [],
+        pendingOrderIds:       [],
+        refundPendingOrderIds: [],
+        rateLimit:             { bucket: 10, lastRefill: 0 },
+        metadata:              { firstSeen: 0, lastSeen: 0, totalOrders: 0 },
     };
 }
 
@@ -36,6 +37,8 @@ interface StubOpts {
     catalogThrows?: boolean;
     /** Catalog item to return from getBySku when not throwing. */
     catalogItem?: CatalogItem | null;
+    /** Behaviour for btcrecharge.submitRefundAddress. */
+    submitRefundAddress?: 'ok' | BtcrechargeApiError | Error;
 }
 
 function makeDeps(opts: StubOpts = {}): RenderDeps {
@@ -54,10 +57,16 @@ function makeDeps(opts: StubOpts = {}): RenderDeps {
         createLightningOrder: async () => {
             throw new Error('should not be reached in these tests');
         },
+        submitRefundAddress: async () => {
+            const s = opts.submitRefundAddress;
+            if (s === undefined || s === 'ok') return { ok: true as const, state: 'refund_pending' };
+            throw s;
+        },
     } as unknown as BtcrechargeClient;
 
     const sessionStore = {
         linkOrder: async () => { /* noop */ },
+        mutate:    async (_pk: string, fn: (s: CustomerSession) => CustomerSession) => fn(makeSession()),
     } as unknown as SessionStore;
 
     return {
@@ -156,6 +165,72 @@ test('send_pending_orders non-empty: lists each remembered order ID', async () =
     assert.ok(reply, 'reply must not be null');
     assert.match(reply, /Order 1015/);
     assert.match(reply, /Order 1019/);
+});
+
+// ----- Phase 3: refund address ---------------------------------------
+
+test('submit_refund_address (success): tells the customer the address is being verified', async () => {
+    const deps  = makeDeps({ submitRefundAddress: 'ok' });
+    const reply = await actionToText(
+        { kind: 'submit_refund_address', orderId: '1042', address: 'alice@walletofsatoshi.com' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /verifying alice@walletofsatoshi\.com/);
+    assert.match(reply, /refund is on the way/);
+});
+
+test('submit_refund_address (unreachable_address): asks for a different address', async () => {
+    const deps = makeDeps({
+        submitRefundAddress: new BtcrechargeApiError(400, 'unreachable_address', 'no response'),
+    });
+    const reply = await actionToText(
+        { kind: 'submit_refund_address', orderId: '1042', address: 'broken@nowhere.test' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /does not seem reachable/);
+    assert.match(reply, /different one/);
+});
+
+test('submit_refund_address (order_not_refundable): tells the customer the order moved on', async () => {
+    const deps = makeDeps({
+        submitRefundAddress: new BtcrechargeApiError(409, 'order_not_refundable', 'already refunded'),
+    });
+    const reply = await actionToText(
+        { kind: 'submit_refund_address', orderId: '1042', address: 'alice@walletofsatoshi.com' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /no longer in refund_pending/);
+});
+
+test('submit_refund_address (5xx / network): asks to retry the same address shortly', async () => {
+    const deps = makeDeps({
+        submitRefundAddress: new BtcrechargeApiError(503, 'backend_down', 'temporary'),
+    });
+    const reply = await actionToText(
+        { kind: 'submit_refund_address', orderId: '1042', address: 'alice@walletofsatoshi.com' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /Could not reach the refund service/);
+    assert.match(reply, /try again/);
+});
+
+test('submit_refund_address (non-numeric orderId): bails with a support nudge instead of crashing', async () => {
+    const deps  = makeDeps();
+    const reply = await actionToText(
+        { kind: 'submit_refund_address', orderId: 'not-a-number', address: 'alice@walletofsatoshi.com' },
+        makeSession(),
+        deps,
+    );
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /Something is off|contact support/i);
 });
 
 test('send_confirm_prompt reports an out-of-range pick instead of silently substituting', async () => {

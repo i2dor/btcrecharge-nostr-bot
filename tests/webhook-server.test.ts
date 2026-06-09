@@ -26,7 +26,7 @@ import {
     createWebhookServer,
     renderStateNotification,
 } from '../src/webhook-server.js';
-import type { SessionStore } from '../src/session.js';
+import { blankSession, type CustomerSession, type SessionStore } from '../src/session.js';
 import type { CatalogClient } from '../src/catalog.js';
 import type { RelayPool } from '../src/relay-pool.js';
 
@@ -37,17 +37,31 @@ const SECRET = 'd'.repeat(64);
 
 type LookupMap = Map<string, string>;
 
-function stubSessionStore(lookup: LookupMap): SessionStore {
+interface SessionStateMap {
+    /** Per-pubkey latest session as the bot would have stored it. */
+    sessions: Map<string, CustomerSession>;
+    /** Last result of the mutate call, for assertions. */
+    lastMutation: CustomerSession | null;
+}
+
+function stubSessionStore(lookup: LookupMap, state: SessionStateMap): SessionStore {
     return {
         lookupPubkey: async (id: string) => lookup.get(id) ?? null,
         unlinkOrder:  async (id: string) => { lookup.delete(id); },
-        get: async () => null,
-        // unused by the webhook path but required by the type:
-        save: async () => undefined,
-        touch: async () => false,
-        delete: async () => undefined,
-        linkOrder: async () => undefined,
-        mutate: async () => { throw new Error('not used'); },
+        get:          async (pk: string) => state.sessions.get(pk) ?? null,
+        save:         async () => undefined,
+        touch:        async () => false,
+        delete:       async () => undefined,
+        linkOrder:    async () => undefined,
+        // Apply the provided mutator to the stored session (or a blank
+        // one if missing), record the result, persist it back.
+        mutate: async (pk: string, fn: (s: CustomerSession) => CustomerSession) => {
+            const current = state.sessions.get(pk) ?? blankSession(pk);
+            const next    = fn(current);
+            state.sessions.set(pk, next);
+            state.lastMutation = next;
+            return next;
+        },
     } as unknown as SessionStore;
 }
 
@@ -69,6 +83,7 @@ const stubCatalog = {} as unknown as CatalogClient;
 
 let baseUrl = '';
 let lookup: LookupMap;
+let state:  SessionStateMap;
 let relay:  ReturnType<typeof stubRelayPool>;
 let server: ReturnType<typeof createWebhookServer>;
 
@@ -80,10 +95,11 @@ function sign(body: string, ts: number): { ts: string; sig: string } {
 
 before(async () => {
     lookup = new Map();
+    state  = { sessions: new Map(), lastMutation: null };
     relay  = stubRelayPool();
     server = createWebhookServer({
         nostrProxySecret: SECRET,
-        sessionStore:     stubSessionStore(lookup),
+        sessionStore:     stubSessionStore(lookup, state),
         catalog:          stubCatalog,
         relayPool:        relay,
         botSecret:        new Uint8Array(32).fill(1),
@@ -208,4 +224,77 @@ test('renderStateNotification: covers every documented state', () => {
     assert.match(renderStateNotification({ internal_order_id: 1, state: 'expired' })!,            /expired/i);
     assert.match(renderStateNotification({ internal_order_id: 1, state: 'invalid', error: 'bad operator' })!, /bad operator/);
     assert.equal(renderStateNotification({ internal_order_id: 1, state: 'unknown_future_state' }), null);
+});
+
+// ----- Phase 3: refund_pending / refund_reminder / refunded ---------
+
+test('renderStateNotification: refund_pending lists both accepted formats and the sats amount', () => {
+    const text = renderStateNotification({ internal_order_id: 1015, state: 'refund_pending', sats: 9395 })!;
+    assert.match(text, /1015/);
+    assert.match(text, /Lightning address/);
+    assert.match(text, /LNURL-pay/);
+    assert.match(text, /9395 sats/);
+});
+
+test('renderStateNotification: refund_reminder messages vary with attempt number', () => {
+    const a1 = renderStateNotification({ internal_order_id: 1, state: 'refund_reminder', reminder_attempt: 1 })!;
+    const a3 = renderStateNotification({ internal_order_id: 1, state: 'refund_reminder', reminder_attempt: 3 })!;
+    assert.match(a1, /Reminder/i);
+    assert.match(a3, /operator/i);            // final reminder mentions operator escalation
+    assert.notEqual(a1, a3);
+});
+
+test('renderStateNotification: refunded with refund_tx surfaces the tx for receipts', () => {
+    const text = renderStateNotification({ internal_order_id: 1, state: 'refunded', refund_tx: 'abc123' })!;
+    assert.match(text, /abc123/);
+});
+
+// The pubkey here MUST be a valid secp256k1 x-coordinate or
+// buildOutboundDm raises "bad point: is not on curve" during the
+// NIP-04 ECDH step. The existing 'a'.repeat(64) and 'b'.repeat(64)
+// keys happen to be valid; we reuse the 'a' one (the underlying
+// session map is keyed by pubkey, so isolating tests by orderId only
+// is enough).
+const VALID_TEST_PUBKEY = 'a'.repeat(64);
+
+test('webhook: refund_pending mutates the session into awaiting_refund_address and adds the order', async () => {
+    lookup.set('1015', VALID_TEST_PUBKEY);
+    state.sessions.set(VALID_TEST_PUBKEY, blankSession(VALID_TEST_PUBKEY));
+
+    const body = JSON.stringify({ internal_order_id: 1015, state: 'refund_pending', sats: 9395 });
+    const { ts, sig } = sign(body, Math.floor(Date.now() / 1000));
+    const res = await fetch(baseUrl + '/webhook/order', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Timestamp': ts, 'X-Signature': sig },
+        body,
+    });
+    assert.equal(res.status, 200);
+
+    const after = state.sessions.get(VALID_TEST_PUBKEY)!;
+    assert.equal(after.flow.type, 'awaiting_refund_address');
+    assert.equal((after.flow.ctx as { orderId?: string }).orderId, '1015');
+    assert.ok(after.refundPendingOrderIds.includes('1015'));
+});
+
+test('webhook: refunded for the current refund flow flips back to idle and clears the list', async () => {
+    lookup.set('1042', VALID_TEST_PUBKEY);
+    const start: CustomerSession = {
+        ...blankSession(VALID_TEST_PUBKEY),
+        flow:                  { type: 'awaiting_refund_address', ctx: { orderId: '1042' } },
+        refundPendingOrderIds: ['1042'],
+    };
+    state.sessions.set(VALID_TEST_PUBKEY, start);
+
+    const body = JSON.stringify({ internal_order_id: 1042, state: 'refunded', refund_tx: 'tx-abc' });
+    const { ts, sig } = sign(body, Math.floor(Date.now() / 1000));
+    const res = await fetch(baseUrl + '/webhook/order', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Timestamp': ts, 'X-Signature': sig },
+        body,
+    });
+    assert.equal(res.status, 200);
+
+    const after = state.sessions.get(VALID_TEST_PUBKEY)!;
+    assert.equal(after.flow.type, 'idle');
+    assert.deepEqual(after.refundPendingOrderIds, []);
 });

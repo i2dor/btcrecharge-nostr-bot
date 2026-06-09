@@ -29,6 +29,9 @@ export const WebhookPayloadSchema = z.object({
     sats:              z.number().int().positive().optional(),
     voucher_pin:       z.string().optional(),
     error:             z.string().optional(),
+    // Phase 3: cron reminder + completed refund details.
+    reminder_attempt:  z.number().int().min(1).max(10).optional(),
+    refund_tx:         z.string().optional(),
 });
 
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
@@ -58,9 +61,28 @@ export function renderStateNotification(payload: WebhookPayload): string | null 
         case 'payout_failed':
             return 'Hiccup while delivering. I am retrying automatically.';
         case 'refund_pending':
-            return 'The order failed. Reply with a Lightning address and I will issue your refund.';
+            return [
+                `The order ${payload.internal_order_id} failed.`,
+                '',
+                'Reply with one of:',
+                '  - a Lightning address (e.g. alice@walletofsatoshi.com)',
+                '  - an LNURL-pay        (e.g. lnurl1...)',
+                payload.sats ? `and I will refund ${payload.sats} sats.` : 'and I will issue your refund.',
+            ].filter(Boolean).join('\n');
+        case 'refund_reminder': {
+            const attempt = payload.reminder_attempt ?? 1;
+            if (attempt >= 3) {
+                return [
+                    `Still waiting on a Lightning address for the refund on order ${payload.internal_order_id}.`,
+                    'I will hold this refund for an operator to handle. Reply any time with an address and I will retry automatically.',
+                ].join('\n');
+            }
+            return `Reminder: I still need a Lightning address for the refund on order ${payload.internal_order_id}. Reply with an address or LNURL when ready.`;
+        }
         case 'refunded':
-            return 'Your refund has been sent. Thanks for being patient.';
+            return payload.refund_tx
+                ? `Refund sent. tx: ${payload.refund_tx}. Thanks for being patient.`
+                : 'Your refund has been sent. Thanks for being patient.';
         case 'expired':
             return 'The Lightning invoice expired before payment. /menu to start over.';
         case 'invalid':
@@ -136,6 +158,34 @@ async function handleRequest(
         res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end('{"ok":true,"note":"no_subscriber"}');
         return;
+    }
+
+    // Phase 3: refund flow needs us to mutate the session so the next
+    // DM from the customer is parsed against the right flow state. We
+    // do this BEFORE the DM publish so a race where the customer
+    // replies instantly still finds the right flow on read.
+    const orderIdStr = String(payload.internal_order_id);
+    if (payload.state === 'refund_pending') {
+        await deps.sessionStore.mutate(pubkey, (s) => ({
+            ...s,
+            flow: { type: 'awaiting_refund_address', ctx: { orderId: orderIdStr } },
+            refundPendingOrderIds: s.refundPendingOrderIds.includes(orderIdStr)
+                ? s.refundPendingOrderIds
+                : [...s.refundPendingOrderIds, orderIdStr],
+        }));
+    } else if (payload.state === 'refunded') {
+        await deps.sessionStore.mutate(pubkey, (s) => ({
+            ...s,
+            // Move the order out of the refund-pending list; if the
+            // customer was still in awaiting_refund_address for this
+            // order, also bounce them to idle so a stray "+" reaction
+            // doesn't re-trigger anything.
+            flow: (s.flow.type === 'awaiting_refund_address'
+                   && (s.flow.ctx as { orderId?: string }).orderId === orderIdStr)
+                ? { type: 'idle', ctx: {} }
+                : s.flow,
+            refundPendingOrderIds: s.refundPendingOrderIds.filter(id => id !== orderIdStr),
+        }));
     }
 
     const text = renderStateNotification(payload);

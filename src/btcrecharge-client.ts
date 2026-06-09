@@ -55,6 +55,29 @@ export const CreateLightningOrderResponseSchema = z.object({
 
 export type CreateLightningOrderResponse = z.infer<typeof CreateLightningOrderResponseSchema>;
 
+// ----- refund address (Phase 3) -------------------------------------
+
+export const SubmitRefundAddressInputSchema = z.object({
+    internalOrderId: z.number().int().positive(),
+    /**
+     * Lightning address (LUD-16, e.g. `alice@walletofsatoshi.com`) OR
+     * LNURL-pay bech32 (`lnurl1...`). The backend probes the resolved
+     * well-known endpoint before triggering the pull-payment, so an
+     * unreachable address is rejected with a typed code here instead
+     * of stranding the refund.
+     */
+    address:         z.string().min(4).max(2048),
+});
+
+export type SubmitRefundAddressInput = z.infer<typeof SubmitRefundAddressInputSchema>;
+
+export const SubmitRefundAddressResponseSchema = z.object({
+    ok:        z.literal(true),
+    state:     z.string(),
+});
+
+export type SubmitRefundAddressResponse = z.infer<typeof SubmitRefundAddressResponseSchema>;
+
 // ----- error type ----------------------------------------------------
 
 export class BtcrechargeApiError extends Error {
@@ -128,6 +151,33 @@ export class BtcrechargeClient {
         return 'nostr-' + randomUUID();
     }
 
+    /**
+     * Submit a Lightning address / LNURL for an order in `refund_pending`.
+     * Backend probes the well-known/lnurlp endpoint, then triggers the
+     * BTCPay pull-payment + transitions to `refunded`. Throws
+     * `BtcrechargeApiError` on 4xx (typed code from the response body)
+     * or 5xx so the caller can map probe-failure vs backend-down vs
+     * already-refunded into distinct customer messages.
+     */
+    async submitRefundAddress(input: SubmitRefundAddressInput): Promise<SubmitRefundAddressResponse> {
+        const validated = SubmitRefundAddressInputSchema.parse(input);
+        const body = JSON.stringify({
+            internal_order_id: validated.internalOrderId,
+            address:           validated.address,
+        });
+        const timestamp = Math.floor(Date.now() / 1000).toString();
+        const signature = this.sign(timestamp, body);
+
+        const res = await this.postWithTimeout('/internal/refund-address', body, {
+            'Content-Type': 'application/json',
+            'X-Timestamp':  timestamp,
+            'X-Signature':  signature,
+            'X-Client':     'nostr',
+        });
+
+        return parseRefundResponse(res, this.log);
+    }
+
     // ----- internals --------------------------------------------------
 
     /**
@@ -180,4 +230,32 @@ async function parseResponse(
         throw new BtcrechargeApiError(res.status, code, message);
     }
     return CreateLightningOrderResponseSchema.parse(json);
+}
+
+/**
+ * Mirror of `parseResponse` but for the refund endpoint. The response
+ * schema differs (no BOLT11, no sats), and the typical error codes the
+ * caller cares about are `unreachable_address`, `bad_address`,
+ * `order_not_refundable`. They surface through `BtcrechargeApiError.code`
+ * unchanged so render.ts can map them into customer-readable messages.
+ */
+async function parseRefundResponse(
+    res: Response,
+    log: Logger,
+): Promise<SubmitRefundAddressResponse> {
+    const text = await res.text();
+    let json: unknown;
+    try { json = JSON.parse(text); }
+    catch {
+        log.error({ status: res.status, snippet: text.slice(0, 200) }, 'non-JSON refund response');
+        throw new BtcrechargeApiError(res.status, 'invalid_response', 'non-JSON response from btcrecharge');
+    }
+    if (!res.ok) {
+        const code    = (typeof json === 'object' && json !== null && 'error'  in json) ? String((json as { error: unknown }).error)  : 'unknown';
+        const detail  = (typeof json === 'object' && json !== null && 'detail' in json) ? String((json as { detail: unknown }).detail) : '';
+        const message = detail || code;
+        log.warn({ status: res.status, code }, 'btcrecharge refund non-2xx');
+        throw new BtcrechargeApiError(res.status, code, message);
+    }
+    return SubmitRefundAddressResponseSchema.parse(json);
 }
