@@ -20,7 +20,7 @@ render it nicely.
 ## Quick start
 
 ```bash
-cd /Users/i2dor/Sites/btcrecharge-nostr-bot
+cd btcrecharge-nostr-bot
 
 # Dry-run first (signs + prints, does not broadcast)
 BOT_NSEC=<nsec1...> npm run publish-article -- \

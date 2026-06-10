@@ -31,7 +31,7 @@ Verify first with `--dry-run` (prints the signed event without
 broadcasting):
 
 ```bash
-cd /Users/i2dor/Sites/btcrecharge-nostr-bot
+cd btcrecharge-nostr-bot
 
 BOT_NSEC=<nsec1...> npm run publish-profile -- \
   --about=$'https://btcrecharge.com\nInternational mobile top-ups paid in Bitcoin and Lightning.\nDM me and type  /menu  to start.' \

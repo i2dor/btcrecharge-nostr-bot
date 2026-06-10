@@ -11,8 +11,9 @@ invoice machinery, Bitrefill dispatch, retry, and refund logic - the bot
 itself owns only session state (capability detection, cart, rate limits)
 and the Nostr <-> HTTP translation layer.
 
-See `/Users/i2dor/.claude/runbooks/nostr-bot-btcrecharge-2026-06-09.md` for
-the architectural decisions (library, encryption, state, secrets).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architectural
+decisions (library, encryption, state, secrets) and [`docs/INDEX.md`](docs/INDEX.md)
+for the full documentation index.
 
 ## Architecture in one diagram
 

@@ -69,7 +69,7 @@ Same env contract as `publish-profile`: `BOT_NSEC` from Railway,
 Dry-run first (prints the signed event without broadcasting):
 
 ```bash
-cd /Users/i2dor/Sites/btcrecharge-nostr-bot
+cd btcrecharge-nostr-bot
 
 BOT_NSEC=<nsec1...> npm run delete-event -- \
   --event-id=<64-hex> \
