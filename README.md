@@ -81,4 +81,4 @@ scripts/    # one-off operational scripts (key rotation, smoke tests)
 
 ## License
 
-Proprietary. All rights reserved.
+MIT - see [`LICENSE`](LICENSE) for the full text.

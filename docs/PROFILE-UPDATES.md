@@ -60,8 +60,9 @@ BOT_NSEC=<nsec1...> npm run publish-profile -- \
   --banner=https://nostr.build/i/<id>.png
 ```
 
-Asset files live in `~/Downloads/btcrecharge-bot-assets/` after
-generation; design source is `/tmp/btcrecharge-{avatar,banner}.svg`.
+Upload picture / banner to a public host (nostr.build, blossom.primal.net,
+imgur, ...) before passing the URL to the script; the URL has to be
+reachable by any Nostr client that will render the profile.
 
 ## All supported flags
 
