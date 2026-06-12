@@ -341,8 +341,12 @@ test('fsm: unknown input during awaiting_payment nudges, does not reset flow', (
 
 test('fsm: greeting words from idle re-show the welcome message', () => {
     const r = transition(idle(), { kind: 'unknown', raw: 'gm' });
+    assert.equal(r.actions[0]!.kind, 'send_text');
     if (r.actions[0]!.kind === 'send_text') {
-        assert.match(r.actions[0]!.text, /btcrecharge/);
+        assert.match(r.actions[0]!.text, /Hi! I'm btcrecharge bot/);
+        assert.match(r.actions[0]!.text, /^\/menu - list available countries$/m);
+        assert.match(r.actions[0]!.text, /^\/buy <sku> - start a purchase \(e\.g\. \/buy vodafone-romania-ro\)$/m);
+        assert.match(r.actions[0]!.text, /Example:\n\/menu RO\nthen type\n\/buy vodafone-romania-ro/);
     }
 });
 

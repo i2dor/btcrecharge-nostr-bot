@@ -331,14 +331,20 @@ function idle(session: CustomerSession): CustomerSession {
 
 function greeting(): string {
     return [
-        'Hi! btcrecharge - international mobile top-ups paid in Bitcoin.',
+        "Hi! I'm btcrecharge bot - international mobile top-ups paid in Bitcoin.",
         '',
-        '  /menu              list available top-ups',
-        '  /buy <sku>         start a purchase',
-        '  /cart              show current cart',
-        '  /status <id>       check an order',
-        '  /help              show this message',
+        '/menu - list available countries',
+        '/menu <cc> - see top-ups for a country (e.g. /menu RO)',
+        '/buy <sku> - start a purchase (e.g. /buy vodafone-romania-ro)',
+        '/cart - show current cart',
+        '/status <id> - check an order',
+        '/cancel - abort an in-flight order',
+        '/clear - empty the cart',
+        '/help - show this message',
         '',
-        'Example: /buy airtel-in-5',
+        'Example:',
+        '/menu RO',
+        'then type',
+        '/buy vodafone-romania-ro',
     ].join('\n');
 }

@@ -280,7 +280,9 @@ test('renderMenu (country set): shows only that country\'s operators with SKUs +
     ]);
     const text = renderMenu(items, 'IN');
     assert.match(text, /IN operators/);
-    assert.match(text, /airtel-in/);
+    // " - for " delimiter, no padEnd column alignment (proportional fonts
+    // in Nostr clients mash padded columns into one gap).
+    assert.match(text, /^airtel-in - for Airtel \[5 \/ 10\] USD$/m);
     // The example must use a real listed SKU, not the "<sku>" placeholder
     // customers were copy-pasting verbatim.
     assert.match(text, /Example: Use "\/buy airtel-in" to start\./);

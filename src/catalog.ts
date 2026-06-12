@@ -298,7 +298,9 @@ export function renderMenu(items: readonly CatalogItem[], country?: string): str
         const lines: string[] = [`${countryFlag(cc)} ${cc} operators:`, ''];
         for (const row of rows) {
             const amts = row.amounts.slice(0, 6).join(' / ');
-            lines.push(`  ${row.sku.padEnd(28)} ${row.label}  [${amts}${row.amounts.length > 6 ? ' ...' : ''}] ${row.currency}`);
+            // No column padding: Nostr clients render DMs in proportional
+            // fonts, so padEnd alignment collapses into one mashed gap.
+            lines.push(`${row.sku} - for ${row.label} [${amts}${row.amounts.length > 6 ? ' ...' : ''}] ${row.currency}`);
         }
         lines.push('');
         // Customers were copy-pasting "<sku>" verbatim. Show a concrete

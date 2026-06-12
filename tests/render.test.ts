@@ -126,11 +126,12 @@ test('send_amounts renders a numbered list keyed to the catalog order', async ()
     const deps  = makeDeps({ catalogItem: VODAFONE_RO_ITEM });
     const reply = await actionToText({ kind: 'send_amounts', sku: 'vodafone-romania-ro' }, makeSession(), deps);
     assert.ok(reply, 'reply must not be null');
-    // Each amount in the catalog row should appear as "N) <amount> <currency>".
-    assert.match(reply, /1\) 4\.76 EUR/);
-    assert.match(reply, /2\) 6\.95 EUR/);
-    assert.match(reply, /3\) 13\.90 EUR/);
-    assert.match(reply, /4\) 27\.80 EUR/);
+    // Each amount in the catalog row should appear as "N) <amount> <currency>"
+    // at line start - no column padding (proportional fonts mash it).
+    assert.match(reply, /^1\) 4\.76 EUR$/m);
+    assert.match(reply, /^2\) 6\.95 EUR$/m);
+    assert.match(reply, /^3\) 13\.90 EUR$/m);
+    assert.match(reply, /^4\) 27\.80 EUR$/m);
     assert.match(reply, /Reply with the number/);
 });
 
@@ -144,8 +145,28 @@ test('send_confirm_prompt echoes the chosen amount so the customer can verify be
     assert.ok(reply, 'reply must not be null');
     // Index 3 means amounts[2] -> "13.90", not the first row (4.76) the
     // pre-Phase-2.6 bot would have auto-picked.
-    assert.match(reply, /Vodafone Romania 13\.90 EUR -> \+40734145710/);
+    assert.match(reply, /^Vodafone Romania - 13\.90 EUR -> \+40734145710$/m);
     assert.match(reply, /\/confirm/);
+});
+
+test('send_help lists commands with " - " delimiters (no column padding)', async () => {
+    const deps  = makeDeps();
+    const reply = await actionToText({ kind: 'send_help' }, makeSession(), deps);
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /^\/menu - list available countries$/m);
+    assert.match(reply, /^\/menu <cc> - see top-ups for a country \(e\.g\. \/menu RO\)$/m);
+    assert.match(reply, /^\/buy <sku> - start a purchase \(e\.g\. \/buy vodafone-romania-ro\)$/m);
+    assert.match(reply, /^\/cancel - abort an in-flight order$/m);
+    assert.match(reply, /^\/clear - empty the cart$/m);
+});
+
+test('send_cart non-empty: one " - " delimited line per item', async () => {
+    const deps    = makeDeps();
+    const session = makeSession();
+    session.cart = [{ sku: 'vodafone-romania-ro', amount: 5, phone: '+40734145710' }];
+    const reply = await actionToText({ kind: 'send_cart' }, session, deps);
+    assert.ok(reply, 'reply must not be null');
+    assert.match(reply, /^vodafone-romania-ro - 5 -> \+40734145710$/m);
 });
 
 test('send_pending_orders empty: tells the customer they have no orders in flight', async () => {
@@ -163,8 +184,8 @@ test('send_pending_orders non-empty: lists each remembered order ID', async () =
     session.pendingOrderIds = ['1015', '1019'];
     const reply = await actionToText({ kind: 'send_pending_orders' }, session, deps);
     assert.ok(reply, 'reply must not be null');
-    assert.match(reply, /Order 1015/);
-    assert.match(reply, /Order 1019/);
+    assert.match(reply, /^Order 1015 - I will DM you when it changes state\.$/m);
+    assert.match(reply, /^Order 1019 - I will DM you when it changes state\.$/m);
 });
 
 // ----- Phase 3: refund address ---------------------------------------

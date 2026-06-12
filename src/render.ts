@@ -25,15 +25,19 @@ export interface RenderDeps {
     logger:       Logger;
 }
 
+// No column padding anywhere in DM bodies: Nostr clients render DMs in
+// proportional fonts, so space alignment collapses into one mashed gap.
 const HELP_TEXT = [
     'Commands:',
-    '  /menu              list available top-ups',
-    '  /buy <sku>         start a purchase',
-    '  /cart              show current cart',
-    '  /status <id>       check an order',
-    '  /cancel            abort an in-flight order',
-    '  /clear             empty the cart',
-    '  /help              show this message',
+    '',
+    '/menu - list available countries',
+    '/menu <cc> - see top-ups for a country (e.g. /menu RO)',
+    '/buy <sku> - start a purchase (e.g. /buy vodafone-romania-ro)',
+    '/cart - show current cart',
+    '/status <id> - check an order',
+    '/cancel - abort an in-flight order',
+    '/clear - empty the cart',
+    '/help - show this message',
 ].join('\n');
 
 /**
@@ -69,7 +73,7 @@ export async function actionToText(
             }
             const lines = ['Your pending orders:'];
             for (const id of session.pendingOrderIds) {
-                lines.push(`  Order ${id}  - I will DM you when it changes state.`);
+                lines.push(`Order ${id} - I will DM you when it changes state.`);
             }
             return lines.join('\n');
         }
@@ -78,7 +82,7 @@ export async function actionToText(
             if (session.cart.length === 0) return 'Your cart is empty. /menu to start.';
             const lines = ['Your cart:'];
             for (const it of session.cart) {
-                lines.push(`  ${it.sku}  ${it.amount}  ${it.phone}`);
+                lines.push(`${it.sku} - ${it.amount} -> ${it.phone}`);
             }
             return lines.join('\n');
         }
@@ -137,7 +141,7 @@ async function renderAmounts(sku: string, deps: RenderDeps): Promise<string> {
     const { item } = res;
     const lines = [`${item.label} - choose an amount:`, ''];
     item.amounts.forEach((amt, i) => {
-        lines.push(`  ${i + 1}) ${amt} ${item.currency}`);
+        lines.push(`${i + 1}) ${amt} ${item.currency}`);
     });
     lines.push('');
     lines.push('Reply with the number, e.g. "1".');
@@ -157,7 +161,12 @@ async function renderConfirmPrompt(
     if (!amount) {
         return `That choice is outside the list (1 to ${item.amounts.length}). Reply /cancel and try /buy again.`;
     }
-    return `Confirm: ${item.label} ${amount} ${item.currency} -> ${phone}. Reply /confirm to proceed or /cancel to abort.`;
+    return [
+        'Confirm purchase:',
+        `${item.label} - ${amount} ${item.currency} -> ${phone}`,
+        '',
+        'Reply /confirm to proceed, /cancel to abort.',
+    ].join('\n');
 }
 
 async function createInvoice(
