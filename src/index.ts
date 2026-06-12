@@ -12,15 +12,15 @@
  *   - shutdown on SIGINT/SIGTERM with a best-effort drain
  */
 import Redis from 'ioredis';
-import { type Filter } from 'nostr-tools';
 
 import { BtcrechargeClient } from './btcrecharge-client.js';
 import { resolveCallbackUrl } from './callback-url.js';
 import { CatalogClient } from './catalog.js';
 import { getConfig } from './config.js';
-import { handleIncomingDm } from './handler.js';
+import { buildInboundFilters, handleIncomingDm } from './handler.js';
 import { getIdentity } from './identity.js';
 import { getLogger } from './logger.js';
+import { RecipientRelays } from './nip65.js';
 import { RelayPool } from './relay-pool.js';
 import { SessionStore } from './session.js';
 import { createWebhookServer } from './webhook-server.js';
@@ -58,19 +58,8 @@ async function main(): Promise<void> {
         nostrProxySecret: cfg.nostrProxySecret,
     }, log);
 
-    const relayPool = new RelayPool({ relays: cfg.nostrRelays }, log);
-
-    // Inbound subscription: kind 4 (NIP-04) + kind 1059 (NIP-17 gift wrap)
-    // addressed to the bot pubkey. Look back 5 minutes so a customer DM
-    // sent in the brief window around a Railway redeploy is picked up on
-    // boot. The relay pool dedupes via seen-event-id LRU, so replaying
-    // recent events on every restart is harmless.
-    const since: number = Math.floor(Date.now() / 1000) - 300;
-    const filter: Filter = {
-        kinds: [4, 1059],
-        '#p':  [id.pubkey],
-        since,
-    };
+    const relayPool       = new RelayPool({ relays: cfg.nostrRelays }, log);
+    const recipientRelays = new RecipientRelays(relayPool, log);
 
     const callbackUrl = resolveCallbackUrl({
         botPublicUrl:        cfg.botPublicUrl,
@@ -88,18 +77,26 @@ async function main(): Promise<void> {
         );
     }
 
-    relayPool.subscribe(filter, (event) => {
-        void handleIncomingDm(event, {
-            botSecret:    id.secret,
-            sessionStore,
-            catalog,
-            btcrecharge,
-            relayPool,
-            callbackUrl,
-            minPowBits:   0, // disabled by default for MVP
-            logger:       log,
+    // Inbound subscriptions: kind 4 (NIP-04) + kind 1059 (NIP-17 gift
+    // wrap) addressed to the bot pubkey, with per-kind `since` windows
+    // (NIP-59 backdates gift-wrap timestamps up to 2 days). The handler's
+    // freshness gate on the decrypted send time drops replayed history;
+    // the relay pool dedupes via seen-event-id LRU.
+    for (const filter of buildInboundFilters(id.pubkey, Math.floor(Date.now() / 1000))) {
+        relayPool.subscribe(filter, (event) => {
+            void handleIncomingDm(event, {
+                botSecret:    id.secret,
+                sessionStore,
+                catalog,
+                btcrecharge,
+                relayPool,
+                callbackUrl,
+                minPowBits:   0, // disabled by default for MVP
+                recipientRelays,
+                logger:       log,
+            });
         });
-    });
+    }
 
     const server = createWebhookServer({
         nostrProxySecret: cfg.nostrProxySecret,
@@ -107,6 +104,7 @@ async function main(): Promise<void> {
         catalog,
         relayPool,
         botSecret:        id.secret,
+        recipientRelays,
         logger:           log,
     }, cfg.port);
 

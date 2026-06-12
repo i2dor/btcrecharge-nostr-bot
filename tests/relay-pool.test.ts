@@ -27,6 +27,8 @@ interface StubHandle {
 
 class StubPool implements PoolBackend {
     public publishCalls:    Array<{ urls: string[]; event: NostrEvent }> = [];
+    public queryCalls:      Array<{ urls: string[]; filter: Filter }> = [];
+    public queryResults:    NostrEvent[] = [];
     public subscribeCalls   = 0;
     public connectionStatus = new Map<string, boolean>();
     public publishOutcome:  'all-ok' | 'all-fail' | 'mixed' = 'all-ok';
@@ -39,6 +41,11 @@ class StubPool implements PoolBackend {
             if (this.publishOutcome === 'all-fail') return Promise.reject(new Error('rejected'));
             return i % 2 === 0 ? Promise.resolve() : Promise.reject(new Error('odd-relay-fail'));
         });
+    }
+
+    async querySync(urls: string[], filter: Filter): Promise<NostrEvent[]> {
+        this.queryCalls.push({ urls, filter });
+        return this.queryResults;
     }
 
     subscribeMany(
@@ -135,6 +142,56 @@ test('relay-pool: publish reports per-relay outcomes', async () => {
     assert.equal(outcomes.filter(o => o.ok).length,  2);
     assert.equal(outcomes.filter(o => !o.ok).length, 1);
     assert.equal(stub.publishCalls.length, 1);
+    pool.close();
+});
+
+test('relay-pool: publish unions extra recipient relays, deduped against the pool list', async () => {
+    const stub = new StubPool();
+    const pool = new RelayPool(
+        { relays: ['wss://a', 'wss://b'], poolFactory: () => stub },
+        SILENT,
+    );
+
+    const outcomes = await pool.publish(makeEvent('extra-1'), ['wss://b', 'wss://customer-inbox']);
+
+    assert.deepEqual(
+        stub.publishCalls[0]!.urls,
+        ['wss://a', 'wss://b', 'wss://customer-inbox'],
+        'extra relays append after the pool list, duplicates removed',
+    );
+    assert.equal(outcomes.length, 3);
+    pool.close();
+});
+
+test('relay-pool: query runs a one-shot fetch over pool + extra relays', async () => {
+    const stub = new StubPool();
+    stub.queryResults = [makeEvent('q-1')];
+    const pool = new RelayPool({ relays: ['wss://a'], poolFactory: () => stub }, SILENT);
+
+    const events = await pool.query({ kinds: [10002] }, { extraRelays: ['wss://indexer'] });
+
+    assert.deepEqual(events.map(e => e.id), ['q-1']);
+    assert.deepEqual(stub.queryCalls[0]!.urls, ['wss://a', 'wss://indexer']);
+    assert.deepEqual(stub.queryCalls[0]!.filter, { kinds: [10002] });
+    pool.close();
+});
+
+test('relay-pool: getHealth matches relays when the backend keys are normalized URLs', () => {
+    const stub = new StubPool();
+    // The real SimplePool keys listConnectionStatus() by normalizeURL()
+    // output (trailing slash, lowercase host); config URLs usually lack
+    // the slash. getHealth must still find them.
+    stub.connectionStatus.set('wss://relay.damus.io/', true);
+    stub.connectionStatus.set('wss://nos.lol/', true);
+    const pool = new RelayPool(
+        { relays: ['wss://relay.damus.io', 'wss://nos.lol'], poolFactory: () => stub },
+        SILENT,
+    );
+
+    const h = pool.getHealth();
+    assert.equal(h.connected, 2, 'normalized backend keys must still count as connected');
+    assert.equal(h.relayStatus['wss://relay.damus.io'], 'connected');
+    assert.equal(h.relayStatus['wss://nos.lol'], 'connected');
     pool.close();
 });
 

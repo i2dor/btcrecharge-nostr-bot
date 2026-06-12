@@ -64,7 +64,7 @@ node -e "const { nip19 } = require('nostr-tools'); console.log(nip19.decode('not
 ## Run the deletion
 
 Same env contract as `publish-profile`: `BOT_NSEC` from Railway,
-`NOSTR_RELAYS` defaults to the canonical three if unset.
+`NOSTR_RELAYS` defaults to the canonical five if unset.
 
 Dry-run first (prints the signed event without broadcasting):
 
@@ -98,8 +98,10 @@ Per-relay outcome, similar to publish-profile:
 wss://relay.damus.io                  ok
 wss://nos.lol                         ok
 wss://relay.snort.social              ok
+wss://relay.primal.net                ok
+wss://offchain.pub                    ok
 
-Deletion request broadcast to 3/3 relays.
+Deletion request broadcast to 5/5 relays.
 
 Reminder: NIP-09 is a request, not a hard delete. Relays may
 ignore it, and clients that already cached the event may still

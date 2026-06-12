@@ -65,16 +65,28 @@ function stubSessionStore(lookup: LookupMap, state: SessionStateMap): SessionSto
     } as unknown as SessionStore;
 }
 
-function stubRelayPool(): RelayPool & { publishedEvents: NostrEvent[] } {
+function stubRelayPool(): RelayPool & {
+    publishedEvents: NostrEvent[];
+    publishExtras:   Array<readonly string[] | undefined>;
+} {
     const publishedEvents: NostrEvent[] = [];
+    const publishExtras:   Array<readonly string[] | undefined> = [];
     return {
         publishedEvents,
+        publishExtras,
         publishAtLeastOne: async (evt: NostrEvent) => { publishedEvents.push(evt); },
-        publish:    async () => [],
+        publish: async (evt: NostrEvent, extraRelays?: readonly string[]) => {
+            publishedEvents.push(evt);
+            publishExtras.push(extraRelays);
+            return [{ url: 'wss://t', ok: true }];
+        },
         subscribe:  () => ({ id: '0', close: () => {} }),
         getHealth:  () => ({ total: 0, connected: 0, relayStatus: {}, activeSubscriptions: 0, seenWindow: 0 }),
         close:      () => {},
-    } as unknown as RelayPool & { publishedEvents: NostrEvent[] };
+    } as unknown as RelayPool & {
+        publishedEvents: NostrEvent[];
+        publishExtras:   Array<readonly string[] | undefined>;
+    };
 }
 
 const stubCatalog = {} as unknown as CatalogClient;
@@ -86,6 +98,7 @@ let lookup: LookupMap;
 let state:  SessionStateMap;
 let relay:  ReturnType<typeof stubRelayPool>;
 let server: ReturnType<typeof createWebhookServer>;
+let resolveCalls: string[];
 
 function sign(body: string, ts: number): { ts: string; sig: string } {
     const tsStr = String(ts);
@@ -94,15 +107,22 @@ function sign(body: string, ts: number): { ts: string; sig: string } {
 }
 
 before(async () => {
-    lookup = new Map();
-    state  = { sessions: new Map(), lastMutation: null };
-    relay  = stubRelayPool();
+    lookup       = new Map();
+    state        = { sessions: new Map(), lastMutation: null };
+    relay        = stubRelayPool();
+    resolveCalls = [];
     server = createWebhookServer({
         nostrProxySecret: SECRET,
         sessionStore:     stubSessionStore(lookup, state),
         catalog:          stubCatalog,
         relayPool:        relay,
         botSecret:        new Uint8Array(32).fill(1),
+        recipientRelays:  {
+            resolve: async (pubkey: string) => {
+                resolveCalls.push(pubkey);
+                return ['wss://customer-inbox'];
+            },
+        },
         logger:           SILENT,
     }, 0);
     await new Promise<void>(r => server.on('listening', r));
@@ -187,6 +207,24 @@ test('webhook: known order_id with state=delivered dispatches a DM and drops the
     assert.equal(res.status, 200);
     assert.equal(relay.publishedEvents.length >= 1, true, 'at least one DM kind should have been published');
     assert.equal(lookup.has('42'), false, 'terminal state should drop the reverse-index entry');
+});
+
+test('webhook: state DM routes to the recipient relays the resolver returns', async () => {
+    const pubkey = 'a'.repeat(64);
+    lookup.set('4242', pubkey);
+
+    const body = JSON.stringify({ internal_order_id: 4242, state: 'delivered' });
+    const { ts, sig } = sign(body, Math.floor(Date.now() / 1000));
+    const res = await fetch(baseUrl + '/webhook/order', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Timestamp': ts, 'X-Signature': sig },
+        body,
+    });
+    assert.equal(res.status, 200);
+
+    assert.ok(resolveCalls.includes(pubkey), 'resolver must be asked for the subscriber pubkey');
+    assert.ok(relay.publishExtras.length >= 1, 'state DM must go through publish(event, extraRelays)');
+    assert.deepEqual(relay.publishExtras.at(-1), ['wss://customer-inbox']);
 });
 
 test('webhook: paying_bitrefill stays silent (no DM) but still 200', async () => {

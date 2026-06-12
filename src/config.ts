@@ -11,7 +11,7 @@ const Schema = z.object({
     BOT_NSEC:             z.string({ required_error: 'BOT_NSEC is required' }).min(1, 'BOT_NSEC is required'),
     NOSTR_PROXY_SECRET:   z.string({ required_error: 'NOSTR_PROXY_SECRET must be 64 hex' }).regex(/^[0-9a-f]{64}$/i, 'NOSTR_PROXY_SECRET must be 64 hex'),
     BTCRECHARGE_BASE_URL: z.string().url().default('https://btcrecharge.com'),
-    NOSTR_RELAYS:         z.string().min(1).default('wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social'),
+    NOSTR_RELAYS:         z.string().min(1).default('wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social,wss://relay.primal.net,wss://offchain.pub'),
     // Railway internal hostnames (redis-volume.railway.internal) parse fine
     // as URLs, but zod's url() rejects values containing dots-as-tld when
     // the host lacks a public suffix. Relax to "starts with redis://" so

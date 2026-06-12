@@ -20,11 +20,17 @@
  */
 import type { Filter, NostrEvent } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools';
+import { normalizeURL } from 'nostr-tools/utils';
 import type { Logger } from 'pino';
 
 /** The slice of SimplePool we actually use. Stubbable in tests. */
 export interface PoolBackend {
     publish(relays: string[], event: NostrEvent): Promise<void>[];
+    querySync(
+        relays: string[],
+        filter: Filter,
+        params?: { maxWait?: number },
+    ): Promise<NostrEvent[]>;
     subscribeMany(
         relays: string[],
         filter: Filter,
@@ -73,6 +79,9 @@ interface InternalSub {
 
 const DEFAULT_RESUBSCRIBE_MS = 2 * 60 * 1000; // 2 minutes - keeps live tail fresh on public relays
 const DEFAULT_SEEN_LIMIT     = 5000;
+// One-shot query budget: long enough for a slow public relay to answer,
+// short enough not to stall a customer reply noticeably.
+const DEFAULT_QUERY_WAIT_MS  = 3500;
 
 export class RelayPool {
     private readonly backend:      PoolBackend;
@@ -124,16 +133,19 @@ export class RelayPool {
     }
 
     /**
-     * Publish to every relay. Returns the per-relay outcome so the caller
-     * can decide whether partial success is good enough; the helper
-     * `publishAtLeastOne` covers the common case.
+     * Publish to every pool relay plus the optional extras (the
+     * recipient's NIP-65/NIP-17 inbox relays), deduped. Returns the
+     * per-relay outcome so the caller can decide whether partial success
+     * is good enough; the helper `publishAtLeastOne` covers the common
+     * case.
      */
-    async publish(event: NostrEvent): Promise<PublishOutcome[]> {
+    async publish(event: NostrEvent, extraRelays: readonly string[] = []): Promise<PublishOutcome[]> {
         if (this.closed) throw new Error('RelayPool is closed');
-        const pubs = this.backend.publish(this.urls as string[], event);
+        const urls = this.unionUrls(extraRelays);
+        const pubs = this.backend.publish(urls, event);
         const settled = await Promise.allSettled(pubs);
         const outcomes: PublishOutcome[] = settled.map((res, i) => {
-            const url = this.urls[i] ?? '<unknown>';
+            const url = urls[i] ?? '<unknown>';
             return res.status === 'fulfilled'
                 ? { url, ok: true }
                 : { url, ok: false, error: (res.reason as Error)?.message ?? String(res.reason) };
@@ -141,6 +153,21 @@ export class RelayPool {
         const okCount = outcomes.filter(o => o.ok).length;
         this.log.info({ eventId: event.id.slice(0, 12), okCount, total: outcomes.length }, 'publish');
         return outcomes;
+    }
+
+    /**
+     * One-shot fetch over the pool relays plus optional extras (e.g. a
+     * relay-list aggregator). Resolves at EOSE or after `maxWaitMs`.
+     */
+    async query(
+        filter: Filter,
+        opts: { extraRelays?: readonly string[]; maxWaitMs?: number } = {},
+    ): Promise<NostrEvent[]> {
+        if (this.closed) throw new Error('RelayPool is closed');
+        const urls = this.unionUrls(opts.extraRelays ?? []);
+        return this.backend.querySync(urls, filter, {
+            maxWait: opts.maxWaitMs ?? DEFAULT_QUERY_WAIT_MS,
+        });
     }
 
     /** Throw if zero relays accepted the publish. */
@@ -157,9 +184,16 @@ export class RelayPool {
     getHealth(): PoolHealth {
         const status: Record<string, 'connected' | 'connecting' | 'closed'> = {};
         let connected = 0;
-        const live = this.backend.listConnectionStatus();
+        // SimplePool keys listConnectionStatus() by normalizeURL() output
+        // (trailing slash, lowercase host); config strings usually lack
+        // the slash. Normalize both sides or every relay reads as
+        // 'connecting' forever.
+        const live = new Map<string, boolean>();
+        for (const [url, flag] of this.backend.listConnectionStatus()) {
+            live.set(normalizeURL(url), flag);
+        }
         for (const url of this.urls) {
-            const flag = live.get(url);
+            const flag = live.get(normalizeURL(url));
             if (flag === true)  { status[url] = 'connected'; connected++; }
             else if (flag === false) { status[url] = 'closed'; }
             else                  { status[url] = 'connecting'; }
@@ -187,6 +221,11 @@ export class RelayPool {
     }
 
     // --- internals -----------------------------------------------------
+
+    private unionUrls(extraRelays: readonly string[]): string[] {
+        if (extraRelays.length === 0) return this.urls as string[];
+        return [...new Set([...this.urls, ...extraRelays])];
+    }
 
     private openHandle(sub: InternalSub): void {
         sub.handle = this.backend.subscribeMany(this.urls as string[], sub.filter, {

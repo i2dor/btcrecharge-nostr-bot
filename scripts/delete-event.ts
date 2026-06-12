@@ -69,7 +69,7 @@ export function parseDeleteFlags(argv: readonly string[]): DeleteFlags {
 
 function relays(): readonly string[] {
     const raw = process.env['NOSTR_RELAYS']
-        ?? 'wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social';
+        ?? 'wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social,wss://relay.primal.net,wss://offchain.pub';
     return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 

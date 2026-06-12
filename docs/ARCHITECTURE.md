@@ -77,7 +77,8 @@ Source files in `src/`, one purpose each.
 | `config.ts` | zod-validated env contract. Every env var validated at boot; bad value = loud crash. |
 | `logger.ts` | pino with a redact list for secrets. Used everywhere via `.child({ component: 'X' })`. |
 | `callback-url.ts` | Resolve the public origin btcrecharge POSTs to. Resolution order: BOT_PUBLIC_URL > RAILWAY_PUBLIC_DOMAIN > localhost. Unit-testable. |
-| `relay-pool.ts` | SimplePool wrapper. Re-issues subscriptions periodically, dedupes events, tracks connection status for `/health`. |
+| `relay-pool.ts` | SimplePool wrapper. Re-issues subscriptions periodically, dedupes events, tracks connection status for `/health`. `publish(event, extraRelays)` unions the recipient's relays into the pool list; `query(filter, opts)` is a one-shot fetch for relay-list lookups. |
+| `nip65.ts` | `RecipientRelays` resolver: kind 10050 (NIP-17 DM inbox) preferred, kind 10002 (NIP-65, read/unmarked) fallback, queried via pool + purplepag.es aggregator, cached 10 min per pubkey. |
 | `crypto.ts` | NIP-04 + NIP-17 encrypt/decrypt + `buildOutboundDm` that picks the kind(s) to send based on detected capability. |
 | `anti-spam.ts` | Token bucket per-pubkey, plus optional NIP-13 PoW verifier. |
 | `session.ts` | `SessionStore` over Redis: `get`, `save`, `mutate` (WATCH/MULTI/EXEC retry), `linkOrder`/`lookupPubkey` reverse index. |
@@ -86,7 +87,7 @@ Source files in `src/`, one purpose each.
 | `btcrecharge-client.ts` | HMAC-signed POST to `/internal/lightning-orders`. Surface error shape via `BtcrechargeApiError`. |
 | `render.ts` | Action -> reply text. Owns the strings the customer sees; one place to localise later. |
 | `webhook-server.ts` | Node stdlib HTTP server. `GET /health`, `POST /webhook/order` (HMAC + zod + renderStateNotification + DM publish). |
-| `handler.ts` | The DM pipeline: PoW gate -> decrypt -> mutate session combining rate-limit + FSM -> render -> publish. |
+| `handler.ts` | The DM pipeline: PoW gate -> decrypt -> freshness gate on the real send time -> mutate session combining rate-limit + FSM -> render -> publish (pool + recipient relays). Also exports `buildInboundFilters` with per-kind `since` windows (kind 1059 needs a 2-day lookback because NIP-59 backdates wrap timestamps). |
 
 `scripts/publish-profile.ts` is a one-shot CLI, not part of the running
 bot. See [PROFILE-UPDATES.md](PROFILE-UPDATES.md).
@@ -98,7 +99,10 @@ bot. See [PROFILE-UPDATES.md](PROFILE-UPDATES.md).
 1. Relay pool receives kind 4 or kind 1059 event tagged with bot pubkey
 2. Handler:
    - PoW gate (skip when `minPowBits=0`)
-   - `crypto.decryptInbound` -> plain text + protocol used
+   - `crypto.decryptIncoming` -> plain text + protocol used + real send time
+   - Freshness gate: DMs older than 10 min (relay replay / redeploy
+     backlog) drop without a reply
+   - Kick off the NIP-65/10050 recipient-relay lookup in parallel
 3. SessionStore `mutate(pubkey, fn)`:
    - In Redis: WATCH key, GET current session
    - `parseCommand(text, session.flow)` -> Intent
@@ -110,7 +114,8 @@ bot. See [PROFILE-UPDATES.md](PROFILE-UPDATES.md).
    - `render.actionToText(action, session, deps)` -> reply string
    - `crypto.buildOutboundDm(...)` -> array of signed events
      (NIP-04 + NIP-17 depending on protocol detection)
-   - `relayPool.publishAtLeastOne(event)` for each
+   - `relayPool.publish(event, recipientRelays)` for each - pool relays
+     plus the customer's resolved inbox relays
 
 ### Customer pays the Lightning invoice
 

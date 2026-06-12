@@ -42,6 +42,8 @@ export interface WebhookServerDeps {
     catalog:          CatalogClient;
     relayPool:        RelayPool;
     botSecret:        Uint8Array;
+    /** NIP-65/NIP-17 inbox resolver; when absent DMs go pool-only. */
+    recipientRelays?: { resolve(pubkey: string): Promise<string[]> };
     logger:           Logger;
 }
 
@@ -190,14 +192,18 @@ async function handleRequest(
 
     const text = renderStateNotification(payload);
     if (text !== null) {
+        const recipientRelayUrls = deps.recipientRelays
+            ? await deps.recipientRelays.resolve(pubkey)
+            : [];
         const session = await deps.sessionStore.get(pubkey);
         const events  = buildOutboundDm(deps.botSecret, pubkey, text, session?.protocol ?? null);
-        await Promise.allSettled(events.map(e => deps.relayPool.publishAtLeastOne(e)));
+        await Promise.allSettled(events.map(e => deps.relayPool.publish(e, recipientRelayUrls)));
         log.info({
-            orderId: payload.internal_order_id,
-            state:   payload.state,
-            pubkey:  pubkey.slice(0, 8),
-            kinds:   events.map(e => e.kind),
+            orderId:         payload.internal_order_id,
+            state:           payload.state,
+            pubkey:          pubkey.slice(0, 8),
+            kinds:           events.map(e => e.kind),
+            recipientRelays: recipientRelayUrls.length,
         }, 'state DM dispatched');
     }
 

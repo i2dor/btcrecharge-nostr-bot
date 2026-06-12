@@ -80,7 +80,7 @@ All three should pass before declaring the deploy good.
 In the Railway log, the first 10 seconds after a deploy should show:
 
 ```
-{... "msg":"bot booting", "npub":"npub1...", "env":"production", "relays":3, "redisUrl":"redis://default:***@redis.railway.internal:6379"}
+{... "msg":"bot booting", "npub":"npub1...", "env":"production", "relays":5, "redisUrl":"redis://default:***@redis.railway.internal:6379"}
 {... "msg":"redis connected"}
 {... "msg":"callback URL resolved", "callbackUrl":"https://btcrecharge-nostr-bot-production.up.railway.app/webhook/order"}
 {... "msg":"webhook server listening", "port":8080}

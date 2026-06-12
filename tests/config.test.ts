@@ -35,6 +35,8 @@ test('config: minimal env populates documented defaults', async () => {
         'wss://relay.damus.io',
         'wss://nos.lol',
         'wss://relay.snort.social',
+        'wss://relay.primal.net',
+        'wss://offchain.pub',
     ]);
     assert.equal(cfg.redisUrl, 'redis://localhost:6379');
     assert.equal(cfg.port, 3000);

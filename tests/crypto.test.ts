@@ -50,6 +50,8 @@ test('crypto: NIP-04 round-trip surfaces plaintext + real sender pubkey', () => 
     assert.equal(decrypted.plaintext,    plaintext);
     assert.equal(decrypted.protocol,     'nip04');
     assert.equal(decrypted.senderPubkey, senderPub);
+    assert.equal(decrypted.sentAt,       event.created_at,
+        'kind-4 timestamps are real, sentAt mirrors created_at');
 });
 
 test('crypto: NIP-17 round-trip surfaces sealed sender, not gift-wrap author', () => {
@@ -68,6 +70,24 @@ test('crypto: NIP-17 round-trip surfaces sealed sender, not gift-wrap author', (
     assert.equal(decrypted.protocol,     'nip17');
     assert.equal(decrypted.senderPubkey, senderPub,
         'unwrapped sender must be the sealed real sender, not the ephemeral wrap key');
+});
+
+test('crypto: NIP-17 sentAt is the rumor send time, not the backdated wrap timestamp', () => {
+    const { senderSk, recipientSk, recipientPub } = fixture();
+    const before = Math.floor(Date.now() / 1000);
+    const event  = encryptNip17(senderSk, recipientPub, 'freshness check');
+    const after  = Math.floor(Date.now() / 1000);
+
+    const decrypted = decryptIncoming(recipientSk, event);
+    assert.ok(decrypted);
+    // The outer wrap created_at is randomly backdated up to 2 days
+    // (NIP-59); the inner rumor carries the REAL send time. sentAt must
+    // come from the rumor or the handler freshness gate would drop
+    // perfectly fresh gift-wrapped DMs.
+    assert.ok(
+        decrypted.sentAt >= before - 5 && decrypted.sentAt <= after + 5,
+        `sentAt ${decrypted.sentAt} must be the real send time (~now), wrap says ${event.created_at}`,
+    );
 });
 
 test('crypto: decryptIncoming returns null for unsupported event kinds', () => {

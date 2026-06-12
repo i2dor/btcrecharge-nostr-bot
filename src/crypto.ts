@@ -26,6 +26,13 @@ export interface DecryptedDm {
     plaintext:    string;
     protocol:     Protocol;
     senderPubkey: string;
+    /**
+     * Real send time (unix seconds). For NIP-04 this is the event's
+     * created_at; for NIP-17 it is the INNER rumor's created_at - the
+     * outer gift-wrap timestamp is randomly backdated up to 2 days
+     * (NIP-59) and must never be used for freshness decisions.
+     */
+    sentAt:       number;
 }
 
 /**
@@ -83,7 +90,7 @@ export function decryptIncoming(
     if (event.kind === KIND_NIP04_DM) {
         try {
             const plaintext = nip04.decrypt(recipientSecret, event.pubkey, event.content);
-            return { plaintext, protocol: 'nip04', senderPubkey: event.pubkey };
+            return { plaintext, protocol: 'nip04', senderPubkey: event.pubkey, sentAt: event.created_at };
         } catch {
             return null;
         }
@@ -93,7 +100,7 @@ export function decryptIncoming(
             // `unwrapEvent` returns the inner Rumor, whose pubkey is the
             // REAL sender (the gift-wrap author is throwaway).
             const rumor = nip17.unwrapEvent(event, recipientSecret);
-            return { plaintext: rumor.content, protocol: 'nip17', senderPubkey: rumor.pubkey };
+            return { plaintext: rumor.content, protocol: 'nip17', senderPubkey: rumor.pubkey, sentAt: rumor.created_at };
         } catch {
             return null;
         }
