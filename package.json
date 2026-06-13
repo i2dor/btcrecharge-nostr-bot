@@ -15,6 +15,7 @@
     "lint":  "tsc -p tsconfig.json --noEmit",
     "test":  "node --test --import tsx tests/**/*.test.ts",
     "publish-profile": "tsx scripts/publish-profile.ts",
+    "publish-note":    "tsx scripts/publish-note.ts",
     "publish-article": "tsx scripts/publish-article.ts",
     "delete-event":    "tsx scripts/delete-event.ts"
   },
