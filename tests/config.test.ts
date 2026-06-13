@@ -6,8 +6,11 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-const VALID_NSEC   = 'nsec1pkuvx5c82tesk4mnw43r3uv0hra2xc3rwextkk8f4avuq2cfgrlsrwmqr9';
-const VALID_SECRET = 'de1e132c37d6d3bf6cb4a991a7ee855f66783a3212a6999f8014be3409bc78f8';
+import { generateSecretKey, nip19 } from 'nostr-tools';
+
+// Ephemeral throwaway fixtures - generated per run, never real credentials.
+const VALID_NSEC   = nip19.nsecEncode(generateSecretKey());
+const VALID_SECRET = 'deadbeef'.repeat(8); // dummy 64-hex, not a real secret
 
 async function loadFreshConfigModule(): Promise<typeof import('../src/config.js')> {
     const url = new URL(`../src/config.ts?cacheBust=${Math.random()}`, import.meta.url);

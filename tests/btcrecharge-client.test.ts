@@ -22,7 +22,7 @@ import {
 } from '../src/btcrecharge-client.js';
 
 const SILENT = pino({ level: 'silent' });
-const SECRET = 'de1e132c37d6d3bf6cb4a991a7ee855f66783a3212a6999f8014be3409bc78f8';
+const SECRET = 'deadbeef'.repeat(8); // dummy 64-hex, not a real secret
 const BASE   = 'https://btcrecharge.example';
 
 interface CapturedRequest {

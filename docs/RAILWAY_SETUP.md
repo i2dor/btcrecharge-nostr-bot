@@ -27,8 +27,8 @@ In the bot service -> **Variables** tab, add:
 
 | Key                    | Value                                                                 |
 |------------------------|-----------------------------------------------------------------------|
-| `BOT_NSEC`             | `nsec1pkuvx5c82tesk4mnw43r3uv0hra2xc3rwextkk8f4avuq2cfgrlsrwmqr9`     |
-| `NOSTR_PROXY_SECRET`   | `de1e132c37d6d3bf6cb4a991a7ee855f66783a3212a6999f8014be3409bc78f8`     |
+| `BOT_NSEC`             | `<your bot nsec - generate once, keep offline>`                       |
+| `NOSTR_PROXY_SECRET`   | `<64-hex, openssl rand -hex 32 - must match the backend .env>`         |
 | `BTCRECHARGE_BASE_URL` | `https://btcrecharge.com`                                             |
 | `NOSTR_RELAYS`         | `wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social`         |
 | `PORT`                 | `3000`                                                                |
@@ -60,7 +60,7 @@ Default: Railway auto-deploys on every push to `main`. No change needed.
 This is a separate task on the btcrecharge side, not in Railway:
 
 ```
-ssh btcrecharge "echo 'NOSTR_PROXY_SECRET=de1e132c37d6d3bf6cb4a991a7ee855f66783a3212a6999f8014be3409bc78f8' >> ~/public_html/.env"
+ssh btcrecharge "echo 'NOSTR_PROXY_SECRET=<64-hex, same value as the bot Railway env>' >> ~/public_html/.env"
 ```
 
 Then reload PHP-FPM / opcache (Krystal/LiteSpeed):
