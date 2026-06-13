@@ -86,7 +86,7 @@ async function fetchLatestKind0(
         let latest: NostrEvent | null = null;
         const sub = pool.subscribeMany(
             [...relays],
-            [{ kinds: [0], authors: [pubkey], limit: 1 }],
+            { kinds: [0], authors: [pubkey], limit: 1 },
             {
                 onevent: (ev) => {
                     if (!latest || ev.created_at > latest.created_at) latest = ev;
