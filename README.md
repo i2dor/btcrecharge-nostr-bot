@@ -5,6 +5,10 @@ bot's npub (NIP-05: `bot@btcrecharge.com`), pick an international mobile
 top-up SKU, pay a Lightning invoice, and receive the top-up confirmation back
 over Nostr.
 
+> **Verify the official bot before paying:** <https://btcrecharge.com/verify>
+> lists this bot's npub and NIP-05 so you can confirm you are talking to the
+> real account, not an impersonator.
+
 The bot is a thin client over btcrecharge's existing `/internal/orders`
 proxy endpoint. Every order flows through btcrecharge's order FSM, BTCPay
 invoice machinery, Bitrefill dispatch, retry, and refund logic - the bot
@@ -63,6 +67,7 @@ npm run dev
 
 - npub: `npub1zgzksmumsy5q3tq3ywzj6trmdehfvlhts6lpx9799wqz862qr4nqljlucd`
 - NIP-05: `bot@btcrecharge.com`
+- Verify it is the official bot: <https://btcrecharge.com/verify>
 - The matching nsec lives in the password vault. Never in git, never in chat
   logs, never in source.
 
